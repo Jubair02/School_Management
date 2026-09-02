@@ -226,3 +226,17 @@ Work Log:
 Stage Summary:
 - PRODUCTION-READY MVP. All 4 roles verified in-browser. Server on port 3000 green, lint green (0 errors), 12 students/6 teachers/3 parents/5 classes seeded with full academic data.
 - Demo logins: admin@edusphere.test/Admin@123 · teacher@edusphere.test/Teacher@123 · student@edusphere.test/Student@123 · parent@edusphere.test/Parent@123
+
+---
+Task ID: 5 (hotfix)
+Agent: Z.ai Code (orchestrator)
+Task: Fix "login succeeds but does not enter dashboard" reported by user.
+
+Work Log:
+- Diagnosed via dev.log: POST /api/auth/login 200 followed immediately by GET /api/dashboard 401 — session cookie never present on subsequent requests. Next.js warning "Cross origin request detected from preview-chat-*.space-z.ai" confirmed the app is viewed inside the cross-site preview iframe, where browsers block SameSite=Lax cookie set/send (third-party cookie policy; also affects incognito).
+- Fix (dual-mode session): login response now also returns the JWT (`token`); client persists it in localStorage (`edusphere.auth-token`, try/catch-guarded for storage-restricted frames) and sends `Authorization: Bearer` on every request; server requireAuth() accepts Bearer header OR sms_token cookie; 401 clears stored token; logout clears token + cookie.
+- Files changed: src/lib/api-auth.ts (extractToken: Bearer-then-cookie), src/app/api/auth/login/route.ts (token in body), src/lib/client-api.ts (token store + header attach + clear-on-401), src/hooks/use-auth.tsx (store on login, clear on logout).
+- Verified: eslint clean on 4 files; curl matrix — Bearer-no-cookie 200 (me/dashboard/students), no-credentials 401, cookie-only 200; Agent Browser E2E — admin login → dashboard renders live data (12 students/6 teachers/75%/৳27,100), cleared ALL cookies + reload → session survived (proves iframe condition works), Students view loads, logout clears token, student re-login OK; dev.log shows login 200 → dashboard 200, zero 500s.
+
+Stage Summary:
+- Auth now works in ALL contexts: normal tabs (cookie), cross-site preview iframe (Bearer via localStorage), incognito (Bearer). Cookie remains primary; Bearer is fallback. Old logged-in sessions still valid (same JWT secret/claims).

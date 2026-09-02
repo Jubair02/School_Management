@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { api, UNAUTHORIZED_EVENT } from "@/lib/client-api";
+import { api, UNAUTHORIZED_EVENT, setStoredToken } from "@/lib/client-api";
 import type { PublicUser } from "@/lib/types";
 
 interface AuthContextValue {
@@ -68,7 +68,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(
     async (email: string, password: string) => {
-      const data = await api.post<{ user: PublicUser }>("/api/auth/login", { email, password });
+      // Response carries the JWT so the session also works when the browser
+      // refuses cookies (cross-site preview iframe / incognito).
+      const data = await api.post<{ user: PublicUser; token?: string }>("/api/auth/login", {
+        email,
+        password,
+      });
+      if (data.token) setStoredToken(data.token);
       setUser(data.user);
       void queryClient.invalidateQueries();
     },
@@ -81,6 +87,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // best effort — clear locally regardless
     }
+    setStoredToken(null);
     setUser(null);
     queryClient.clear();
   }, [queryClient]);

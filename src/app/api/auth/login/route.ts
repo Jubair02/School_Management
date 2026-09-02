@@ -30,7 +30,10 @@ export const POST = handle(async (req: NextRequest) => {
     email: user.email,
   });
 
-  const res = NextResponse.json({ user: toPublicUser(user) });
+  // The token is also returned in the body so the client can use
+  // `Authorization: Bearer` when browser cookies are unavailable
+  // (e.g. cross-site preview iframes with third-party cookie blocking).
+  const res = NextResponse.json({ user: toPublicUser(user), token });
   res.cookies.set({
     name: COOKIE_NAME,
     value: token,
