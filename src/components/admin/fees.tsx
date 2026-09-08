@@ -11,6 +11,7 @@ import {
   Check,
   Clock,
   History,
+  Pencil,
   Plus,
   Search,
   Trash2,
@@ -79,6 +80,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { FeeEditDialog } from "./fee-edit-dialog";
 
 const TYPE_STYLES: Record<FeeType, string> = {
   TUITION: "border-transparent bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400",
@@ -330,6 +332,11 @@ function PaymentDialog({ fee, onOpenChange }: { fee: FeeDTO; onOpenChange: (open
               toast.error("Enter a positive amount");
               return;
             }
+            // Mirrors the server rule, which rejects anything above the balance.
+            if (Number(amount) > remaining + 0.005) {
+              toast.error(`Amount cannot exceed the remaining ${formatCurrency(remaining)}`);
+              return;
+            }
             mutation.mutate();
           }}
           className="grid gap-4"
@@ -344,10 +351,12 @@ function PaymentDialog({ fee, onOpenChange }: { fee: FeeDTO; onOpenChange: (open
               <Input
                 id="pay-amount"
                 type="number"
-                min="1"
+                min="0.01"
+                max={remaining}
                 step="0.01"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
+                aria-invalid={Number(amount) > remaining + 0.005}
                 required
               />
             </div>
@@ -442,6 +451,7 @@ export function FeesView() {
   const [type, setType] = useState("");
   const [newOpen, setNewOpen] = useState(false);
   const [paying, setPaying] = useState<FeeDTO | null>(null);
+  const [editing, setEditing] = useState<FeeDTO | null>(null);
   const [historyFor, setHistoryFor] = useState<FeeDTO | null>(null);
   const [deleting, setDeleting] = useState<FeeDTO | null>(null);
 
@@ -631,6 +641,15 @@ export function FeesView() {
                       <Button
                         variant="ghost"
                         size="icon"
+                        className="size-8"
+                        aria-label={`Edit ${fee.title}`}
+                        onClick={() => setEditing(fee)}
+                      >
+                        <Pencil className="size-4" aria-hidden />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         className="size-8 text-rose-600 hover:text-rose-700 dark:text-rose-400"
                         aria-label={`Delete ${fee.title}`}
                         onClick={() => setDeleting(fee)}
@@ -648,6 +667,7 @@ export function FeesView() {
 
       {newOpen ? <NewFeeDialog onOpenChange={setNewOpen} /> : null}
       {paying ? <PaymentDialog fee={paying} onOpenChange={(open) => !open && setPaying(null)} /> : null}
+      {editing ? <FeeEditDialog fee={editing} onOpenChange={(open) => !open && setEditing(null)} /> : null}
       <HistoryDialog fee={historyFor} onOpenChange={(open) => !open && setHistoryFor(null)} />
       <ConfirmDialog
         open={Boolean(deleting)}

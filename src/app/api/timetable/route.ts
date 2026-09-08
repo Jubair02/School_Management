@@ -6,6 +6,7 @@ import {
   ApiError,
   WEEK_DAYS,
   handle,
+  minutesOfDay,
   parseBody,
   q,
   sortTimetable,
@@ -56,6 +57,14 @@ export const POST = handle(async (req: NextRequest) => {
     const teacher = await db.teacher.findUnique({ where: { id: body.teacherId } });
     if (!teacher) throw new ApiError(400, "Selected teacher does not exist");
   }
+
+  // The regex only proves the shape is HH:MM — these check it is a real time
+  // and that the period does not end before (or when) it starts.
+  const start = minutesOfDay(body.startTime);
+  const end = minutesOfDay(body.endTime);
+  if (start === null) throw new ApiError(400, "startTime must be a valid time between 00:00 and 23:59");
+  if (end === null) throw new ApiError(400, "endTime must be a valid time between 00:00 and 23:59");
+  if (end <= start) throw new ApiError(400, "endTime must be later than startTime");
 
   const clash = await db.timetable.findFirst({
     where: { classId: body.classId, day: body.day, period: body.period },

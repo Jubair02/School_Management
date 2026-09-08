@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { requireAuth } from "@/lib/api-auth";
+import { requireAuth, requireClassAccess } from "@/lib/api-auth";
 import {
   ApiError,
   ATTENDANCE_STATUSES,
@@ -16,7 +16,7 @@ import {
 // GET /api/attendance?classId&date=YYYY-MM-DD — TEACHER, ADMIN
 // Roster of ACTIVE students in the class; status null when not yet marked.
 export const GET = handle(async (req: NextRequest) => {
-  await requireAuth(req, ["TEACHER", "ADMIN"]);
+  const auth = await requireAuth(req, ["TEACHER", "ADMIN"]);
 
   const classId = q(req, "classId");
   if (!classId) throw new ApiError(400, "classId is required");
@@ -24,6 +24,8 @@ export const GET = handle(async (req: NextRequest) => {
 
   const cls = await db.class.findUnique({ where: { id: classId } });
   if (!cls) throw new ApiError(404, "Class not found");
+
+  await requireClassAccess(auth, classId);
 
   const range = dayRangeUTC(dateStr);
 
@@ -61,7 +63,10 @@ const upsertSchema = z.object({
     .array(
       z.object({
         studentId: z.string().min(1, "studentId is required"),
-        status: z.enum(ATTENDANCE_STATUSES),
+        // null = "not marked": deletes any existing record for that day. The UI
+        // could previously only overwrite a status, never take one back, so a
+        // mistaken absence was permanent.
+        status: z.enum(ATTENDANCE_STATUSES).nullable(),
       })
     )
     .min(1, "At least one attendance record is required"),
@@ -74,6 +79,8 @@ export const POST = handle(async (req: NextRequest) => {
 
   const cls = await db.class.findUnique({ where: { id: body.classId } });
   if (!cls) throw new ApiError(400, "Selected class does not exist");
+
+  await requireClassAccess(auth, body.classId);
 
   // Normalize to UTC midnight — the [studentId, date] unique key is stable per day.
   const dayUTC = new Date(`${body.date}T00:00:00.000Z`);
@@ -90,6 +97,9 @@ export const POST = handle(async (req: NextRequest) => {
     }
   }
 
+  let saved = 0;
+  let cleared = 0;
+
   await db.$transaction(async (tx) => {
     for (const record of body.records) {
       // Match any existing record within the same UTC day (tolerates legacy timestamps).
@@ -97,6 +107,15 @@ export const POST = handle(async (req: NextRequest) => {
         where: { studentId: record.studentId, date: range },
         select: { id: true },
       });
+
+      if (record.status === null) {
+        if (existing) {
+          await tx.attendance.delete({ where: { id: existing.id } });
+          cleared += 1;
+        }
+        continue;
+      }
+
       if (existing) {
         await tx.attendance.update({
           where: { id: existing.id },
@@ -118,8 +137,9 @@ export const POST = handle(async (req: NextRequest) => {
           },
         });
       }
+      saved += 1;
     }
   });
 
-  return NextResponse.json({ saved: body.records.length });
+  return NextResponse.json({ saved, cleared });
 });

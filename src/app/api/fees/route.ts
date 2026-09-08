@@ -15,6 +15,7 @@ import {
   q,
   requireDay,
   toFeeDTO,
+  toMoney,
 } from "@/lib/api-utils";
 
 // GET /api/fees?studentId&status&type
@@ -52,33 +53,26 @@ export const GET = handle(async (req: NextRequest) => {
     throw new ApiError(403, "You do not have permission to view fees");
   }
 
+  // `status` is deliberately NOT part of the SQL filter: the stored column can
+  // be stale (a PENDING fee whose due date has passed is really OVERDUE), so
+  // filtering on it in the database would drop rows that should match. It is
+  // applied below against the freshly computed value instead.
   const where = {
     ...(studentFilter !== undefined ? { studentId: studentFilter } : {}),
-    ...(statusFilter ? { status: statusFilter } : {}),
     ...(typeFilter ? { type: typeFilter } : {}),
   };
 
   const rows = await db.fee.findMany({ where, include: feeInclude, orderBy: { dueDate: "desc" } });
 
-  // Auto-set OVERDUE on read for past-due, partially- or fully-unpaid fees.
-  const stale = rows.filter((f) => {
-    const computed = feeStatusFor(f.amount, f.paidAmount, f.dueDate);
-    return computed !== f.status;
-  });
-  if (stale.length > 0) {
-    await Promise.all(
-      stale.map((f) =>
-        db.fee.update({
-          where: { id: f.id },
-          data: { status: feeStatusFor(f.amount, f.paidAmount, f.dueDate) },
-        })
-      )
-    );
-  }
-
-  const fees = rows.map((f) =>
-    toFeeDTO(f, feeStatusFor(f.amount, f.paidAmount, f.dueDate))
+  // Status is derived, not stored state: PENDING becomes OVERDUE purely by the
+  // due date passing. This used to persist the recomputation, so every read
+  // issued a burst of UPDATEs — a write on a GET, and needless load on a
+  // serverless connection pool. The stored `status` column is now just a cache;
+  // the value below is always computed fresh, so reads stay read-only.
+  const allFees = rows.map((f) =>
+    toFeeDTO(f, feeStatusFor(toMoney(f.amount), toMoney(f.paidAmount), f.dueDate))
   );
+  const fees = statusFilter ? allFees.filter((f) => f.status === statusFilter) : allFees;
 
   const summary = {
     totalDue: Math.round(fees.reduce((s, f) => s + outstandingOf(f.amount, f.paidAmount), 0) * 100) / 100,

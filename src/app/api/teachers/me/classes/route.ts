@@ -35,5 +35,8 @@ export const GET = handle(async (req: NextRequest) => {
     }))
     .sort((a, b) => naturalCompare(a.name, b.name));
 
-  return NextResponse.json({ classes: payload });
+  // `teacherId` is the Teacher record id — the value that DTOs such as
+  // SubjectDTO.teacher.id and TimetableEntryDTO.teacher.id carry. It is NOT the
+  // User id, so the client needs it explicitly to recognise its own rows.
+  return NextResponse.json({ teacherId: teacher.id, classes: payload });
 });

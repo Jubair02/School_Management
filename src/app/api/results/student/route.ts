@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requireAuth } from "@/lib/api-auth";
+import { requireAuth, requireStudentAccess } from "@/lib/api-auth";
 import { ApiError, getParentByUserId, getStudentByUserId, handle, q } from "@/lib/api-utils";
 import { overallFor } from "@/lib/grade";
 
@@ -14,6 +14,8 @@ export const GET = handle(async (req: NextRequest) => {
   if (auth.role === "ADMIN" || auth.role === "TEACHER") {
     const requested = q(req, "studentId");
     if (!requested) throw new ApiError(400, "studentId is required");
+    // ADMIN: any student. TEACHER: only their own classes.
+    await requireStudentAccess(auth, requested);
     studentId = requested;
   } else if (auth.role === "STUDENT") {
     const self = await getStudentByUserId(auth.id);

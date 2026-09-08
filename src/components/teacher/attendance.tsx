@@ -22,7 +22,7 @@ import { api, toQuery } from "@/lib/client-api";
 import type { AttendanceRosterResponse, AttendanceStatus } from "@/lib/types";
 import { EmptyState, LoadingState, LoadError, PageHeader, ScrollTable } from "@/components/shared";
 import { useAppStore } from "@/store/app-store";
-import { formatDay, todayISO, type MyClass } from "./common";
+import { formatDay, todayISO, type MyClassesResponse } from "./common";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -65,7 +65,7 @@ export function TeacherAttendanceView() {
   const queryClient = useQueryClient();
 
   // Initial state seeded from a "Take attendance" quick action (app-store preselect)
-  const [classId, setClassId] = useState(() => useAppStore.getState().attendancePreselect ?? "");
+  const [classId, setClassId] = useState(() => useAppStore.getState().takePreselect("attendancePreselect") ?? "");
   const [date, setDate] = useState(todayISO);
   /**
    * Unsaved status edits as an overlay on top of the server roster, keyed by
@@ -80,7 +80,7 @@ export function TeacherAttendanceView() {
 
   const { data: classesData, isLoading: classesLoading } = useQuery({
     queryKey: ["teacher", "my-classes"],
-    queryFn: () => api.get<{ classes: MyClass[] }>("/api/teachers/me/classes"),
+    queryFn: () => api.get<MyClassesResponse>("/api/teachers/me/classes"),
   });
   const classes = classesData?.classes ?? [];
   const effectiveClassId = classes.some((c) => c.id === classId) ? classId : (classes[0]?.id ?? "");
@@ -119,6 +119,13 @@ export function TeacherAttendanceView() {
 
   const markedCount = counts.PRESENT + counts.ABSENT + counts.LATE + counts.LEAVE;
 
+  /**
+   * Save is enabled when there is anything to write: either marks to record, or
+   * pending edits. Edits matter on their own — clearing every student leaves
+   * markedCount at 0 yet still needs saving to delete the stored records.
+   */
+  const hasChanges = markedCount > 0 || Object.keys(editValues).length > 0;
+
   function setStatus(studentId: string, status: AttendanceStatus | null) {
     setEdits({ key: draftKey, values: { ...editValues, [studentId]: status } });
   }
@@ -131,18 +138,23 @@ export function TeacherAttendanceView() {
 
   const saveMutation = useMutation({
     mutationFn: () => {
-      // Partial-safe: only statuses the teacher actually set are sent.
-      const payload = records
-        .map((r) => ({ studentId: r.studentId, status: statusOf(r.studentId, r.status) }))
-        .filter((r): r is { studentId: string; status: AttendanceStatus } => r.status !== null);
-      return api.post<{ saved: number }>("/api/attendance", {
+      // The roster as shown is the source of truth for this day: nulls are sent
+      // through so the server can clear records the teacher un-marked. Filtering
+      // them out (as before) made the Clear button a no-op.
+      const payload = records.map((r) => ({
+        studentId: r.studentId,
+        status: statusOf(r.studentId, r.status),
+      }));
+      return api.post<{ saved: number; cleared: number }>("/api/attendance", {
         classId: effectiveClassId,
         date,
         records: payload,
       });
     },
     onSuccess: (res) => {
-      toast.success(`Attendance saved — ${res.saved} student${res.saved === 1 ? "" : "s"} marked`);
+      const parts = [`${res.saved} marked`];
+      if (res.cleared > 0) parts.push(`${res.cleared} cleared`);
+      toast.success(`Attendance saved — ${parts.join(", ")}`);
       void queryClient.invalidateQueries({ queryKey: ["teacher", "attendance"] });
       void queryClient.invalidateQueries({ queryKey: ["teacher", "dashboard"] });
     },
@@ -325,8 +337,8 @@ export function TeacherAttendanceView() {
                   <Button
                     className="ml-auto"
                     onClick={() => saveMutation.mutate()}
-                    disabled={saveMutation.isPending || markedCount === 0}
-                    title={markedCount === 0 ? "Mark at least one student first" : undefined}
+                    disabled={saveMutation.isPending || !hasChanges}
+                    title={hasChanges ? undefined : "Mark a student, or change one, to save"}
                   >
                     {saveMutation.isPending ? (
                       <Loader2 className="size-4 animate-spin" aria-hidden />

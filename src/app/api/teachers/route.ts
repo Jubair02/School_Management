@@ -27,9 +27,9 @@ export const GET = handle(async (req: NextRequest) => {
     ...(query
       ? {
           OR: [
-            { user: { name: { contains: query } } },
-            { user: { email: { contains: query } } },
-            { teacherId: { contains: query } },
+            { user: { name: { contains: query, mode: "insensitive" } } },
+            { user: { email: { contains: query, mode: "insensitive" } } },
+            { teacherId: { contains: query, mode: "insensitive" } },
           ],
         }
       : {}),

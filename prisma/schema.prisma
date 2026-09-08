@@ -112,6 +112,7 @@ model Class {
   teacherClasses TeacherClass[]
   timetables     Timetable[]
   announcements  Announcement[]
+  attendances    Attendance[]
 }
 
 model Section {
@@ -153,6 +154,10 @@ model Attendance {
   studentId  String
   student    Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
   classId    String
+  // classId was a bare string with no relation, so rows could reference a
+  // deleted class and nothing enforced integrity. Cascade matches how the other
+  // per-class records (Exam, Timetable, Subject) already behave on class delete.
+  class      Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
   date       DateTime
   // status: PRESENT | ABSENT | LATE | LEAVE
   status     String
@@ -202,8 +207,10 @@ model Fee {
   title      String
   // type: TUITION | ADMISSION | EXAM | TRANSPORT | LIBRARY | OTHER
   type       String
-  amount     Float
-  paidAmount Float    @default(0)
+  // Money is numeric(12,2), not Float: binary floating point cannot represent
+  // every 2-decimal value exactly, so balances could drift as payments accrued.
+  amount     Decimal  @db.Decimal(12, 2)
+  paidAmount Decimal  @db.Decimal(12, 2) @default(0)
   dueDate    DateTime
   // status: PENDING | PARTIAL | PAID | OVERDUE
   status     String   @default("PENDING")
@@ -216,7 +223,7 @@ model Payment {
   id           String   @id @default(cuid())
   feeId        String
   fee          Fee      @relation(fields: [feeId], references: [id], onDelete: Cascade)
-  amount       Float
+  amount       Decimal  @db.Decimal(12, 2)
   // method: CASH | BKASH | NAGAD | BANK
   method       String   @default("CASH")
   note         String?

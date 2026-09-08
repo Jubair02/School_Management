@@ -7,9 +7,8 @@ import { GraduationCap, Info, ListChecks, Loader2, Save, Sigma, TriangleAlert } 
 import { api, toQuery } from "@/lib/client-api";
 import type { ExamDTO, MarksRosterResponse, SubjectDTO } from "@/lib/types";
 import { EmptyState, LoadingState, LoadError, PageHeader, ScrollTable } from "@/components/shared";
-import { useAuth } from "@/hooks/use-auth";
 import { useAppStore } from "@/store/app-store";
-import type { MyClass } from "./common";
+import { isMine, type MyClassesResponse } from "./common";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -39,11 +38,10 @@ function invalidMarks(v: string): boolean {
 }
 
 export function TeacherMarksView() {
-  const { user } = useAuth();
   const queryClient = useQueryClient();
 
   // Initial class seeded from an "Enter marks" quick action (app-store preselect)
-  const [classId, setClassId] = useState(() => useAppStore.getState().marksPreselect ?? "");
+  const [classId, setClassId] = useState(() => useAppStore.getState().takePreselect("marksPreselect") ?? "");
   const [examId, setExamId] = useState("");
   const [subjectId, setSubjectId] = useState("");
   /**
@@ -58,8 +56,9 @@ export function TeacherMarksView() {
 
   const { data: classesData, isLoading: classesLoading } = useQuery({
     queryKey: ["teacher", "my-classes"],
-    queryFn: () => api.get<{ classes: MyClass[] }>("/api/teachers/me/classes"),
+    queryFn: () => api.get<MyClassesResponse>("/api/teachers/me/classes"),
   });
+  const myTeacherId = classesData?.teacherId;
   const classes = classesData?.classes ?? [];
   const effectiveClassId = classes.some((c) => c.id === classId) ? classId : (classes[0]?.id ?? "");
 
@@ -77,7 +76,7 @@ export function TeacherMarksView() {
     enabled: Boolean(effectiveClassId),
   });
   const allSubjects = subjectsData?.subjects ?? [];
-  const mySubjects = allSubjects.filter((s) => s.teacher?.id === user?.id);
+  const mySubjects = allSubjects.filter((s) => isMine(s.teacher?.id, myTeacherId));
   // Only subjects assigned to me — fall back to the full class list when I teach none here.
   const subjectOptions = mySubjects.length > 0 ? mySubjects : allSubjects;
   const effectiveSubjectId = subjectOptions.some((s) => s.id === subjectId)
@@ -107,10 +106,15 @@ export function TeacherMarksView() {
   // Plain derivation — the React Compiler memoizes; rosters are small anyway.
   const stats = (() => {
     const valid: { studentId: string; marks: number }[] = [];
+    /** Rows cleared by the teacher that still hold a stored mark — sent as null to delete. */
+    const deletions: { studentId: string; marks: null }[] = [];
     let invalid = 0;
     for (const r of marksRows) {
       const v = valueOf(r.studentId, r.marks).trim();
-      if (v === "") continue;
+      if (v === "") {
+        if (r.marks !== null) deletions.push({ studentId: r.studentId, marks: null });
+        continue;
+      }
       const n = Number(v);
       if (Number.isNaN(n) || n < 0 || n > 100) {
         invalid += 1;
@@ -119,18 +123,20 @@ export function TeacherMarksView() {
       valid.push({ studentId: r.studentId, marks: n });
     }
     const average = valid.length > 0 ? valid.reduce((sum, v) => sum + v.marks, 0) / valid.length : null;
-    return { valid, invalid, average };
+    return { valid, deletions, invalid, average };
   })();
 
   const saveMutation = useMutation({
     mutationFn: () =>
-      api.post<{ saved: number }>("/api/results", {
+      api.post<{ saved: number; cleared: number }>("/api/results", {
         examId: effectiveExamId,
         subjectId: effectiveSubjectId,
-        marks: stats.valid,
+        marks: [...stats.valid, ...stats.deletions],
       }),
     onSuccess: (res) => {
-      toast.success(`${res.saved} result${res.saved === 1 ? "" : "s"} saved`);
+      const parts = [`${res.saved} result${res.saved === 1 ? "" : "s"} saved`];
+      if (res.cleared > 0) parts.push(`${res.cleared} cleared`);
+      toast.success(parts.join(", "));
       void queryClient.invalidateQueries({ queryKey: ["teacher", "marks"] });
       void queryClient.invalidateQueries({ queryKey: ["exams"] });
       void queryClient.invalidateQueries({ queryKey: ["teacher", "dashboard"] });
@@ -328,8 +334,15 @@ export function TeacherMarksView() {
                     <Button
                       className="ml-auto"
                       onClick={() => saveMutation.mutate()}
-                      disabled={saveMutation.isPending || stats.valid.length === 0}
-                      title={stats.valid.length === 0 ? "Enter at least one valid mark first" : undefined}
+                      disabled={
+                        saveMutation.isPending ||
+                        (stats.valid.length === 0 && stats.deletions.length === 0)
+                      }
+                      title={
+                        stats.valid.length === 0 && stats.deletions.length === 0
+                          ? "Enter a mark, or clear one, to save"
+                          : undefined
+                      }
                     >
                       {saveMutation.isPending ? (
                         <Loader2 className="size-4 animate-spin" aria-hidden />

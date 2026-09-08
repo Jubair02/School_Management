@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Megaphone, Plus, Trash2 } from "lucide-react";
+import { Megaphone, Pencil, Plus, Trash2 } from "lucide-react";
 import { api } from "@/lib/client-api";
 import type {
   AnnouncementDTO,
@@ -57,16 +57,19 @@ function audienceLabel(a: AnnouncementDTO): string {
     : (AUDIENCES.find((x) => x.value === a.targetAudience)?.label ?? titleCase(a.targetAudience));
 }
 
+/** Compose a new announcement, or edit an existing one when `editing` is set. */
 function ComposeDialog({
+  editing,
   onOpenChange,
 }: {
+  editing?: AnnouncementDTO | null;
   onOpenChange: (open: boolean) => void;
 }) {
   const queryClient = useQueryClient();
-  const [title, setTitle] = useState("");
-  const [content, setContent] = useState("");
-  const [audience, setAudience] = useState<AudienceType>("ALL");
-  const [classId, setClassId] = useState("");
+  const [title, setTitle] = useState(editing?.title ?? "");
+  const [content, setContent] = useState(editing?.content ?? "");
+  const [audience, setAudience] = useState<AudienceType>(editing?.targetAudience ?? "ALL");
+  const [classId, setClassId] = useState(editing?.class?.id ?? "");
 
   // Mounted only while composing — state initializers give a fresh form each time.
   const { data: classesData } = useQuery({
@@ -75,15 +78,21 @@ function ComposeDialog({
   });
 
   const mutation = useMutation({
-    mutationFn: () =>
-      api.post("/api/announcements", {
+    mutationFn: () => {
+      const payload = {
         title: title.trim(),
         content: content.trim(),
         targetAudience: audience,
-        classId: audience === "SPECIFIC_CLASS" ? classId : undefined,
-      }),
+        // Sent as null on edit so switching away from SPECIFIC_CLASS actually
+        // detaches the class rather than leaving the old one attached.
+        classId: audience === "SPECIFIC_CLASS" ? classId : editing ? null : undefined,
+      };
+      return editing
+        ? api.put(`/api/announcements/${editing.id}`, payload)
+        : api.post("/api/announcements", payload);
+    },
     onSuccess: () => {
-      toast.success("Announcement published");
+      toast.success(editing ? "Announcement updated" : "Announcement published");
       void queryClient.invalidateQueries({ queryKey: ["announcements"] });
       void queryClient.invalidateQueries({ queryKey: ["admin", "dashboard"] });
       onOpenChange(false);
@@ -97,8 +106,12 @@ function ComposeDialog({
     <FormDialog
       open
       onOpenChange={onOpenChange}
-      title="New announcement"
-      description="Published instantly to the selected audience."
+      title={editing ? "Edit announcement" : "New announcement"}
+      description={
+        editing
+          ? "Changes appear immediately on every dashboard showing this notice."
+          : "Published instantly to the selected audience."
+      }
       onSubmit={(e) => {
         e.preventDefault();
         if (!valid) {
@@ -108,7 +121,7 @@ function ComposeDialog({
         mutation.mutate();
       }}
       submitting={mutation.isPending}
-      submitLabel="Publish"
+      submitLabel={editing ? "Save changes" : "Publish"}
     >
       <div className="grid gap-4">
         <div className="grid gap-2">
@@ -172,6 +185,7 @@ function ComposeDialog({
 export function AnnouncementsView() {
   const queryClient = useQueryClient();
   const [composeOpen, setComposeOpen] = useState(false);
+  const [editing, setEditing] = useState<AnnouncementDTO | null>(null);
   const [deleting, setDeleting] = useState<AnnouncementDTO | null>(null);
 
   const { data, isLoading, error, refetch } = useQuery({
@@ -232,15 +246,26 @@ export function AnnouncementsView() {
                     </Badge>
                     <span className="text-xs text-muted-foreground">{formatDate(a.createdAt)}</span>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-8 shrink-0 text-rose-600 hover:text-rose-700 dark:text-rose-400"
-                    aria-label={`Delete ${a.title}`}
-                    onClick={() => setDeleting(a)}
-                  >
-                    <Trash2 className="size-4" aria-hidden />
-                  </Button>
+                  <div className="flex shrink-0 items-center">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-8"
+                      aria-label={`Edit ${a.title}`}
+                      onClick={() => setEditing(a)}
+                    >
+                      <Pencil className="size-4" aria-hidden />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-8 text-rose-600 hover:text-rose-700 dark:text-rose-400"
+                      aria-label={`Delete ${a.title}`}
+                      onClick={() => setDeleting(a)}
+                    >
+                      <Trash2 className="size-4" aria-hidden />
+                    </Button>
+                  </div>
                 </div>
                 <div className="flex-1">
                   <p className="text-sm font-semibold">{a.title}</p>
@@ -256,6 +281,9 @@ export function AnnouncementsView() {
       )}
 
       {composeOpen ? <ComposeDialog onOpenChange={setComposeOpen} /> : null}
+      {editing ? (
+        <ComposeDialog editing={editing} onOpenChange={(open) => !open && setEditing(null)} />
+      ) : null}
       <ConfirmDialog
         open={Boolean(deleting)}
         onOpenChange={(open) => !open && setDeleting(null)}

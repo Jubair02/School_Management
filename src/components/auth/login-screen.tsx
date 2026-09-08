@@ -15,8 +15,10 @@ import {
   KeyRound,
   Loader2,
   ShieldCheck,
+  MailCheck,
   UserRound,
   UsersRound,
+  type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { api, ApiError } from "@/lib/client-api";
@@ -31,12 +33,28 @@ const loginSchema = z.object({
 });
 type LoginFormValues = z.infer<typeof loginSchema>;
 
-const DEMO_ACCOUNTS = [
-  { role: "Admin", email: "admin@edusphere.test", password: "Admin@123", icon: ShieldCheck },
-  { role: "Teacher", email: "teacher@edusphere.test", password: "Teacher@123", icon: BookOpen },
-  { role: "Student", email: "student@edusphere.test", password: "Student@123", icon: GraduationCap },
-  { role: "Parent", email: "parent@edusphere.test", password: "Parent@123", icon: UsersRound },
-] as const;
+interface DemoAccount {
+  role: string;
+  email: string;
+  password: string;
+  icon: LucideIcon;
+}
+
+/**
+ * Demo credentials are a local-development convenience only. The ternary is
+ * evaluated at build time, so in a production bundle this collapses to `[]`
+ * and the passwords are never shipped to the browser at all.
+ */
+const SHOW_DEMO_ACCOUNTS = process.env.NODE_ENV !== "production";
+
+const DEMO_ACCOUNTS: readonly DemoAccount[] = SHOW_DEMO_ACCOUNTS
+  ? [
+      { role: "Admin", email: "admin@edusphere.test", password: "Admin@123", icon: ShieldCheck },
+      { role: "Teacher", email: "teacher@edusphere.test", password: "Teacher@123", icon: BookOpen },
+      { role: "Student", email: "student@edusphere.test", password: "Student@123", icon: GraduationCap },
+      { role: "Parent", email: "parent@edusphere.test", password: "Parent@123", icon: UsersRound },
+    ]
+  : [];
 
 const FEATURES = [
   { icon: ShieldCheck, title: "Admin control", text: "Students, staff, classes & finances" },
@@ -45,7 +63,7 @@ const FEATURES = [
   { icon: UsersRound, title: "Parent visibility", text: "Follow your child's progress" },
 ] as const;
 
-type Mode = "login" | "forgot" | "reset" | "done";
+type Mode = "login" | "forgot" | "requested" | "reset" | "done";
 
 function BrandMark({ size = "md" }: { size?: "md" | "lg" }) {
   return (
@@ -97,7 +115,7 @@ export function LoginScreen() {
     }
   }
 
-  function fillDemo(account: (typeof DEMO_ACCOUNTS)[number]) {
+  function fillDemo(account: DemoAccount) {
     setMode("login");
     setError(null);
     form.reset({ email: account.email, password: account.password });
@@ -111,10 +129,21 @@ export function LoginScreen() {
     }
     setForgotBusy(true);
     try {
-      const data = await api.post<{ token: string; name: string }>("/api/auth/forgot-password", {
-        email: forgotEmail,
-      });
-      setForgotResult(data);
+      const data = await api.post<{
+        success: boolean;
+        delivered: boolean;
+        token?: string;
+        name?: string;
+      }>("/api/auth/forgot-password", { email: forgotEmail });
+
+      // In production the server never returns a token, and answers the same
+      // way for unknown addresses — so show a neutral confirmation instead.
+      if (!data.delivered || !data.token) {
+        setMode("requested");
+        return;
+      }
+
+      setForgotResult({ token: data.token, name: data.name ?? "" });
       setResetToken(data.token);
       setResetPassword("");
       setMode("reset");
@@ -216,26 +245,28 @@ export function LoginScreen() {
                 <h2 className="text-xl font-semibold tracking-tight">Welcome back</h2>
                 <p className="mt-1 text-sm text-muted-foreground">Sign in to your EduSphere account.</p>
 
-                <div className="mt-5 rounded-xl border bg-muted/40 p-3">
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                    Demo accounts — one click to fill
-                  </p>
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    {DEMO_ACCOUNTS.map((acc) => (
-                      <Button
-                        key={acc.role}
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="justify-start gap-2"
-                        onClick={() => fillDemo(acc)}
-                      >
-                        <acc.icon className="size-4 text-emerald-600 dark:text-emerald-400" aria-hidden />
-                        {acc.role}
-                      </Button>
-                    ))}
+                {DEMO_ACCOUNTS.length > 0 ? (
+                  <div className="mt-5 rounded-xl border bg-muted/40 p-3">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Demo accounts — one click to fill (development only)
+                    </p>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      {DEMO_ACCOUNTS.map((acc) => (
+                        <Button
+                          key={acc.role}
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="justify-start gap-2"
+                          onClick={() => fillDemo(acc)}
+                        >
+                          <acc.icon className="size-4 text-emerald-600 dark:text-emerald-400" aria-hidden />
+                          {acc.role}
+                        </Button>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                ) : null}
 
                 <form onSubmit={form.handleSubmit(onLogin)} className="mt-5 grid gap-4" noValidate>
                   {error ? (
@@ -313,7 +344,9 @@ export function LoginScreen() {
                 </button>
                 <h2 className="text-xl font-semibold tracking-tight">Reset your password</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Enter your account email. In this dev environment the reset token is shown right here.
+                  {SHOW_DEMO_ACCOUNTS
+                    ? "Enter your account email. In this dev environment the reset token is shown right here."
+                    : "Enter your account email and we'll send you a link to choose a new password."}
                 </p>
                 <div className="mt-5 grid gap-4">
                   <div className="grid gap-2">
@@ -329,10 +362,28 @@ export function LoginScreen() {
                   </div>
                   <Button onClick={() => void sendForgot()} disabled={forgotBusy}>
                     {forgotBusy ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <KeyRound className="size-4" aria-hidden />}
-                    {forgotBusy ? "Generating…" : "Generate reset token"}
+                    {forgotBusy
+                      ? "Sending…"
+                      : SHOW_DEMO_ACCOUNTS
+                        ? "Generate reset token"
+                        : "Send reset link"}
                   </Button>
                 </div>
               </>
+            ) : mode === "requested" ? (
+              /* Neutral confirmation — says nothing about whether the address exists. */
+              <div className="flex flex-col items-center gap-3 py-6 text-center">
+                <MailCheck className="size-12 text-emerald-600 dark:text-emerald-400" aria-hidden />
+                <h2 className="text-xl font-semibold tracking-tight">Check your inbox</h2>
+                <p className="text-sm text-muted-foreground">
+                  If an account exists for <span className="font-medium">{forgotEmail}</span>, a password
+                  reset link is on its way. If it doesn&apos;t arrive, please contact the school office.
+                </p>
+                <Button onClick={backToLogin} className="mt-2">
+                  <ArrowLeft className="size-4" aria-hidden />
+                  Back to sign in
+                </Button>
+              </div>
             ) : mode === "reset" ? (
               <>
                 <button

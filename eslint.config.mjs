@@ -44,7 +44,19 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     "no-useless-escape": "off",
   },
 }, {
-  ignores: ["node_modules/**", ".next/**", "out/**", "build/**", "next-env.d.ts", "examples/**", "skills"]
+  ignores: [
+    "node_modules/**",
+    ".next/**",
+    "out/**",
+    "build/**",
+    "next-env.d.ts",
+    "examples/**",
+    // Vendored agent tooling, not application code. The old bare "skills"
+    // pattern never matched these nested paths, so ~95 findings from bundled
+    // third-party scripts were drowning out the real ones.
+    ".claude/**",
+    "skills/**",
+  ]
 }];
 
 export default eslintConfig;

@@ -34,9 +34,13 @@ import type {
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  /** Extra response headers, e.g. `Retry-After` on a 429. */
+  headers?: Record<string, string>;
+
+  constructor(status: number, message: string, headers?: Record<string, string>) {
     super(message);
     this.status = status;
+    this.headers = headers;
   }
 }
 
@@ -65,7 +69,10 @@ function prismaErrorShape(err: unknown): { status: number; message: string } | n
 
 export function toErrorResponse(err: unknown): NextResponse {
   if (err instanceof ApiError) {
-    return NextResponse.json({ error: err.message }, { status: err.status });
+    return NextResponse.json(
+      { error: err.message },
+      { status: err.status, ...(err.headers ? { headers: err.headers } : {}) }
+    );
   }
   if (err instanceof ZodError) {
     const issue = err.issues[0];
@@ -201,11 +208,34 @@ export function sortTimetable<T extends { day: string; period: number }>(rows: T
   );
 }
 
+/** "09:40" → 580 minutes past midnight; null when out of range (e.g. "25:70"). */
+export function minutesOfDay(hhmm: string): number | null {
+  const m = /^(\d{2}):(\d{2})$/.exec(hhmm);
+  if (!m) return null;
+  const hours = Number(m[1]);
+  const minutes = Number(m[2]);
+  if (hours > 23 || minutes > 59) return null;
+  return hours * 60 + minutes;
+}
+
 export function naturalCompare(a: string, b: string): number {
   return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
 }
 
 // ── Fees ───────────────────────────────────────────────────
+
+/**
+ * Money crosses the DB boundary as `Prisma.Decimal` (numeric(12,2)) and leaves
+ * the API as a plain JSON number. This is the single conversion point.
+ *
+ * Storage is exact; the arithmetic below it operates on numbers and rounds to
+ * two decimals at each boundary, which is well inside float64's precision for
+ * currency at school scale. Moving to Decimal arithmetic end to end would mean
+ * threading Decimal through every DTO and chart sum.
+ */
+export function toMoney(value: Prisma.Decimal | number): number {
+  return typeof value === "number" ? value : value.toNumber();
+}
 
 /** Recompute fee status: PAID if paid>=amount; PARTIAL if >0; OVERDUE if past due & unpaid; else PENDING. */
 export function feeStatusFor(amount: number, paidAmount: number, dueDate: Date): FeeStatus {
@@ -464,13 +494,13 @@ export function toFeeDTO(f: FeeRow, statusOverride?: FeeStatus): FeeDTO {
     studentCode: f.student.studentId,
     title: f.title,
     type: f.type as FeeType,
-    amount: f.amount,
-    paidAmount: f.paidAmount,
+    amount: toMoney(f.amount),
+    paidAmount: toMoney(f.paidAmount),
     dueDate: f.dueDate.toISOString(),
-    status: statusOverride ?? feeStatusFor(f.amount, f.paidAmount, f.dueDate),
+    status: statusOverride ?? feeStatusFor(toMoney(f.amount), toMoney(f.paidAmount), f.dueDate),
     payments: f.payments.map((p) => ({
       id: p.id,
-      amount: p.amount,
+      amount: toMoney(p.amount),
       method: p.method as PaymentMethod,
       note: p.note,
       paidAt: p.paidAt.toISOString(),

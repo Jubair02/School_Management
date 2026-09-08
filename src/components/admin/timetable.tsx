@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CalendarDays, Plus, Trash2, X } from "lucide-react";
+import { CalendarDays, Pencil, Plus, Trash2, X } from "lucide-react";
 import { api } from "@/lib/client-api";
 import type {
   ClassDTO,
@@ -60,6 +60,7 @@ interface EntryFormValues {
   teacherId: string;
 }
 
+/** Adds a timetable entry, or edits the existing one when `editing` is passed. */
 function TimetableEntryDialog({
   onOpenChange,
   classId,
@@ -67,6 +68,7 @@ function TimetableEntryDialog({
   initialPeriod,
   defaultStart,
   defaultEnd,
+  editing,
 }: {
   onOpenChange: (open: boolean) => void;
   classId: string;
@@ -74,6 +76,7 @@ function TimetableEntryDialog({
   initialPeriod: number;
   defaultStart: string;
   defaultEnd: string;
+  editing?: TimetableEntryDTO | null;
 }) {
   const queryClient = useQueryClient();
   const { data: subjectsData } = useQuery({
@@ -86,29 +89,35 @@ function TimetableEntryDialog({
     queryFn: () => api.get<TeacherListResponse>("/api/teachers"),
   });
 
-  // Mounted only while adding — initializers seed from the clicked slot each time.
+  // Mounted only while open — initializers seed from the clicked slot, or from
+  // the entry being edited.
   const [values, setValues] = useState<EntryFormValues>({
-    day: initialDay,
-    period: String(initialPeriod),
-    startTime: defaultStart,
-    endTime: defaultEnd,
-    subjectId: "",
-    teacherId: "",
+    day: editing ? editing.day : initialDay,
+    period: String(editing ? editing.period : initialPeriod),
+    startTime: editing?.startTime ?? defaultStart,
+    endTime: editing?.endTime ?? defaultEnd,
+    subjectId: editing?.subject?.id ?? "",
+    teacherId: editing?.teacher?.id ?? "",
   });
 
   const mutation = useMutation({
-    mutationFn: (v: EntryFormValues) =>
-      api.post("/api/timetable", {
-        classId,
+    mutationFn: (v: EntryFormValues) => {
+      const payload = {
         day: v.day,
         period: Number(v.period),
         startTime: v.startTime,
         endTime: v.endTime,
         subjectId: v.subjectId,
-        teacherId: v.teacherId || undefined,
-      }),
+        // null on edit clears an assigned teacher; undefined on create just
+        // omits it.
+        teacherId: v.teacherId || (editing ? null : undefined),
+      };
+      return editing
+        ? api.put(`/api/timetable/${editing.id}`, payload)
+        : api.post("/api/timetable", { classId, ...payload });
+    },
     onSuccess: () => {
-      toast.success("Timetable entry added");
+      toast.success(editing ? "Timetable entry updated" : "Timetable entry added");
       void queryClient.invalidateQueries({ queryKey: ["timetable"] });
       onOpenChange(false);
     },
@@ -121,7 +130,7 @@ function TimetableEntryDialog({
     <FormDialog
       open
       onOpenChange={onOpenChange}
-      title="Add timetable entry"
+      title={editing ? "Edit timetable entry" : "Add timetable entry"}
       description={`Class period on ${DAYS.find((d) => d.value === values.day)?.label ?? ""} — period ${values.period}`}
       onSubmit={(e) => {
         e.preventDefault();
@@ -132,7 +141,7 @@ function TimetableEntryDialog({
         mutation.mutate(values);
       }}
       submitting={mutation.isPending}
-      submitLabel="Add entry"
+      submitLabel={editing ? "Save changes" : "Add entry"}
     >
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="grid gap-2">
@@ -238,6 +247,7 @@ export function TimetableAdminView() {
     start: string;
     end: string;
   } | null>(null);
+  const [editing, setEditing] = useState<TimetableEntryDTO | null>(null);
 
   const { data: classesData } = useQuery({
     queryKey: ["classes"],
@@ -353,15 +363,25 @@ export function TimetableAdminView() {
                               <p className="truncate text-[10px] text-emerald-700/70 dark:text-emerald-400/70">
                                 {entry.teacher?.name ?? "No teacher"}
                               </p>
-                              <button
-                                type="button"
-                                aria-label={`Delete ${entry.subject?.name ?? "entry"} on ${d.label} period ${p}`}
-                                className="absolute right-1 top-1 rounded p-0.5 text-emerald-700/50 opacity-0 transition-opacity hover:text-rose-600 group-hover:opacity-100 dark:text-emerald-400/50"
-                                onClick={() => deleteMutation.mutate(entry.id)}
-                                disabled={deleteMutation.isPending}
-                              >
-                                <X className="size-3.5" aria-hidden />
-                              </button>
+                              <div className="absolute right-1 top-1 flex opacity-0 transition-opacity group-hover:opacity-100">
+                                <button
+                                  type="button"
+                                  aria-label={`Edit ${entry.subject?.name ?? "entry"} on ${d.label} period ${p}`}
+                                  className="rounded p-0.5 text-emerald-700/50 hover:text-emerald-800 dark:text-emerald-400/50 dark:hover:text-emerald-300"
+                                  onClick={() => setEditing(entry)}
+                                >
+                                  <Pencil className="size-3.5" aria-hidden />
+                                </button>
+                                <button
+                                  type="button"
+                                  aria-label={`Delete ${entry.subject?.name ?? "entry"} on ${d.label} period ${p}`}
+                                  className="rounded p-0.5 text-emerald-700/50 hover:text-rose-600 dark:text-emerald-400/50"
+                                  onClick={() => deleteMutation.mutate(entry.id)}
+                                  disabled={deleteMutation.isPending}
+                                >
+                                  <X className="size-3.5" aria-hidden />
+                                </button>
+                              </div>
                             </div>
                           ) : (
                             <button
@@ -393,7 +413,7 @@ export function TimetableAdminView() {
 
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <Trash2 className="size-3" aria-hidden />
-        Hover a filled cell to reveal its delete button; click any empty slot to add a period.
+        Hover a filled cell to edit or delete it; click any empty slot to add a period.
       </p>
 
       {dialog ? (
@@ -404,6 +424,18 @@ export function TimetableAdminView() {
           initialPeriod={dialog.period}
           defaultStart={dialog.start}
           defaultEnd={dialog.end}
+        />
+      ) : null}
+
+      {editing ? (
+        <TimetableEntryDialog
+          editing={editing}
+          onOpenChange={(open) => !open && setEditing(null)}
+          classId={effectiveClassId}
+          initialDay={editing.day}
+          initialPeriod={editing.period}
+          defaultStart={editing.startTime}
+          defaultEnd={editing.endTime}
         />
       ) : null}
     </div>

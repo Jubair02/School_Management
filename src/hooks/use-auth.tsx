@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { api, UNAUTHORIZED_EVENT, setStoredToken } from "@/lib/client-api";
+import { api, UNAUTHORIZED_EVENT } from "@/lib/client-api";
 import type { PublicUser } from "@/lib/types";
 
 interface AuthContextValue {
@@ -54,8 +54,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Initial session check
+  // Initial session check. `refresh` awaits the network before it ever calls
+  // setState, so nothing is set synchronously here — the lint rule cannot see
+  // through the async boundary and reports a false positive.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refresh();
   }, [refresh]);
 
@@ -68,13 +71,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(
     async (email: string, password: string) => {
-      // Response carries the JWT so the session also works when the browser
-      // refuses cookies (cross-site preview iframe / incognito).
-      const data = await api.post<{ user: PublicUser; token?: string }>("/api/auth/login", {
+      // The session arrives as an httpOnly cookie set by the response; only
+      // the public user profile comes back in the body.
+      const data = await api.post<{ user: PublicUser }>("/api/auth/login", {
         email,
         password,
       });
-      if (data.token) setStoredToken(data.token);
       setUser(data.user);
       void queryClient.invalidateQueries();
     },
@@ -87,7 +89,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // best effort — clear locally regardless
     }
-    setStoredToken(null);
     setUser(null);
     queryClient.clear();
   }, [queryClient]);

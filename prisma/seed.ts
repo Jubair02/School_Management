@@ -213,6 +213,14 @@ async function main() {
     { name: "Fariha Akter", email: "fariha@edusphere.test", gender: "FEMALE", cls: "Grade 8", sec: "A", parentIdx: 1 },
     { name: "Shakib Al Hasan", email: "shakib@edusphere.test", gender: "MALE", cls: "Grade 8", sec: "A", parentIdx: 2 },
     { name: "Sumaiya Binte Noor", email: "sumaiya@edusphere.test", gender: "FEMALE", cls: "Grade 8", sec: "B", parentIdx: 0 },
+    // Grade 6 and 7 previously got subjects, timetables and exams but no
+    // students, so those classes rendered as permanently empty rosters.
+    { name: "Rifat Hossain", email: "rifat@edusphere.test", gender: "MALE", cls: "Grade 7", sec: "A", parentIdx: 1 },
+    { name: "Tasnim Jahan", email: "tasnim@edusphere.test", gender: "FEMALE", cls: "Grade 7", sec: "A", parentIdx: 0 },
+    { name: "Mehedi Hasan", email: "mehedi@edusphere.test", gender: "MALE", cls: "Grade 7", sec: "B", parentIdx: 2 },
+    { name: "Nusaiba Rahman", email: "nusaiba@edusphere.test", gender: "FEMALE", cls: "Grade 6", sec: "A", parentIdx: 0 },
+    { name: "Sabbir Khan", email: "sabbir.s@edusphere.test", gender: "MALE", cls: "Grade 6", sec: "A", parentIdx: 2 },
+    { name: "Ishrat Binte Alam", email: "ishrat@edusphere.test", gender: "FEMALE", cls: "Grade 6", sec: "B", parentIdx: 1 },
   ];
 
   const sectionRecords = await db.section.findMany({ include: { class: true } });
@@ -242,7 +250,7 @@ async function main() {
         classId: sec.classId,
         sectionId: sec.id,
         parentId: parents[d.parentIdx].id,
-        admissionDate: new Date(YEAR as number, 0, int(2, 15)),
+        admissionDate: new Date(Number(YEAR), 0, int(2, 15)),
       },
     });
     students.push({ id: rec.id, userId: u.id, classId: sec.classId, name: d.name });

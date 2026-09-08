@@ -3,7 +3,7 @@ import { z } from "zod";
 import bcrypt from "bcryptjs";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireAuth } from "@/lib/api-auth";
+import { requireAuth, teacherClassIdsFor } from "@/lib/api-auth";
 import {
   ApiError,
   GENDERS,
@@ -13,6 +13,7 @@ import {
   dayStartUTC,
   handle,
   outstandingOf,
+  toMoney,
   parseBody,
   studentInclude,
   toStudentDTO,
@@ -42,6 +43,14 @@ export const GET = handle(async (req: NextRequest, ctx: Ctx) => {
       throw new ApiError(403, "You can only view your own child's record");
     }
   }
+  if (auth.role === "TEACHER") {
+    // This payload carries home address, fee balance and GPA — restrict it to
+    // students the teacher actually teaches.
+    const allowed = await teacherClassIdsFor(auth.id);
+    if (!student.classId || !allowed.includes(student.classId)) {
+      throw new ApiError(403, "This student is not in a class you teach.");
+    }
+  }
 
   const [attRows, feeRows, resultRows] = await Promise.all([
     db.attendance.findMany({ where: { studentId: student.id }, select: { status: true } }),
@@ -55,8 +64,8 @@ export const GET = handle(async (req: NextRequest, ctx: Ctx) => {
       ...dto,
       attendanceSummary: attendanceCounts(attRows),
       feeSummary: {
-        due: Math.round(feeRows.reduce((s, f) => s + outstandingOf(f.amount, f.paidAmount), 0) * 100) / 100,
-        totalDue: Math.round(feeRows.reduce((s, f) => s + f.amount, 0) * 100) / 100,
+        due: Math.round(feeRows.reduce((s, f) => s + outstandingOf(toMoney(f.amount), toMoney(f.paidAmount)), 0) * 100) / 100,
+        totalDue: Math.round(feeRows.reduce((s, f) => s + toMoney(f.amount), 0) * 100) / 100,
       },
       gpa: resultRows.length > 0 ? overallFor(resultRows.map((r) => r.marks)).gpa : null,
     },

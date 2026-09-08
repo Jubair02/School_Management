@@ -16,6 +16,7 @@ import {
   timetableInclude,
   toAnnouncementDTO,
   toExamDTO,
+  toMoney,
   toTimetableDTO,
   todayDayName,
   todayISO,
@@ -105,9 +106,9 @@ async function adminDashboard() {
   const todayPresent = todayRecords.filter((r) => r.status === "PRESENT").length;
 
   const pendingFeeAmount = round2(
-    unpaidFees.reduce((sum, f) => sum + outstandingOf(f.amount, f.paidAmount), 0)
+    unpaidFees.reduce((sum, f) => sum + outstandingOf(toMoney(f.amount), toMoney(f.paidAmount)), 0)
   );
-  const pendingFeeCount = unpaidFees.filter((f) => outstandingOf(f.amount, f.paidAmount) > 0).length;
+  const pendingFeeCount = unpaidFees.filter((f) => outstandingOf(toMoney(f.amount), toMoney(f.paidAmount)) > 0).length;
 
   // 7-day attendance trend: bucket by UTC day, keep days that have any marks.
   const dayBuckets = new Map<string, { marked: number; present: number }>();
@@ -136,13 +137,13 @@ async function adminDashboard() {
   for (const p of recentPayments) {
     const key = p.paidAt.toISOString().slice(0, 7);
     if (collectedByMonth.has(key)) {
-      collectedByMonth.set(key, round2((collectedByMonth.get(key) ?? 0) + p.amount));
+      collectedByMonth.set(key, round2((collectedByMonth.get(key) ?? 0) + toMoney(p.amount)));
     }
   }
   for (const f of upcomingFeeDues) {
     const key = f.dueDate.toISOString().slice(0, 7);
     if (dueByMonth.has(key)) {
-      dueByMonth.set(key, round2((dueByMonth.get(key) ?? 0) + f.amount));
+      dueByMonth.set(key, round2((dueByMonth.get(key) ?? 0) + toMoney(f.amount)));
     }
   }
   const feeCollection = months.map((month) => ({
@@ -318,7 +319,7 @@ async function studentDashboard(userId: string) {
       attendancePct: counts.percentage,
       attendanceThisMonth: { present: monthCounts.present, total: monthCounts.total },
       gpa,
-      pendingFees: unpaidFees.filter((f) => outstandingOf(f.amount, f.paidAmount) > 0).length,
+      pendingFees: unpaidFees.filter((f) => outstandingOf(toMoney(f.amount), toMoney(f.paidAmount)) > 0).length,
       upcomingExams: upcomingExamRows.length,
     },
     recentResults: recentResultRows.map((r) => ({
@@ -375,7 +376,7 @@ async function parentDashboard(userId: string) {
           },
           attendancePct: counts.percentage,
           gpa: resultRows.length > 0 ? overallFor(resultRows.map((r) => r.marks)).gpa : null,
-          pendingFeeAmount: round2(unpaidFees.reduce((s, f) => s + outstandingOf(f.amount, f.paidAmount), 0)),
+          pendingFeeAmount: round2(unpaidFees.reduce((s, f) => s + outstandingOf(toMoney(f.amount), toMoney(f.paidAmount)), 0)),
           recentGrade: latestResult?.grade ?? null,
         };
       })

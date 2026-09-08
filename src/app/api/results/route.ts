@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { requireAuth } from "@/lib/api-auth";
+import { requireAuth, requireClassAccess } from "@/lib/api-auth";
 import { ApiError, handle, parseBody } from "@/lib/api-utils";
 import { gradeFor } from "@/lib/grade";
 
 // GET /api/results?examId&subjectId — TEACHER, ADMIN
 // Marks roster: ACTIVE students of the exam's class; marks null when not entered.
 export const GET = handle(async (req: NextRequest) => {
-  await requireAuth(req, ["TEACHER", "ADMIN"]);
+  const auth = await requireAuth(req, ["TEACHER", "ADMIN"]);
 
   const examId = req.nextUrl.searchParams.get("examId")?.trim() || undefined;
   const subjectId = req.nextUrl.searchParams.get("subjectId")?.trim() || undefined;
@@ -23,6 +23,8 @@ export const GET = handle(async (req: NextRequest) => {
   if (subject.classId !== exam.classId) {
     throw new ApiError(400, "This subject does not belong to the exam's class");
   }
+
+  await requireClassAccess(auth, exam.classId);
 
   const [students, results] = await Promise.all([
     db.student.findMany({
@@ -58,7 +60,13 @@ const upsertSchema = z.object({
     .array(
       z.object({
         studentId: z.string().min(1, "studentId is required"),
-        marks: z.number().min(0, "Marks cannot be negative").max(100, "Marks cannot exceed 100"),
+        // null = "not entered": deletes any existing result. Clearing the input
+        // used to be silently skipped on save, leaving the old mark in place.
+        marks: z
+          .number()
+          .min(0, "Marks cannot be negative")
+          .max(100, "Marks cannot exceed 100")
+          .nullable(),
       })
     )
     .min(1, "At least one mark entry is required"),
@@ -66,7 +74,7 @@ const upsertSchema = z.object({
 
 // POST /api/results — TEACHER, ADMIN — upsert marks (unique studentId+examId+subjectId), auto grade/GPA
 export const POST = handle(async (req: NextRequest) => {
-  await requireAuth(req, ["TEACHER", "ADMIN"]);
+  const auth = await requireAuth(req, ["TEACHER", "ADMIN"]);
   const body = await parseBody(req, upsertSchema);
 
   const exam = await db.exam.findUnique({ where: { id: body.examId } });
@@ -77,6 +85,8 @@ export const POST = handle(async (req: NextRequest) => {
   if (subject.classId !== exam.classId) {
     throw new ApiError(400, "This subject does not belong to the exam's class");
   }
+
+  await requireClassAccess(auth, exam.classId);
 
   const classStudents = await db.student.findMany({
     where: { classId: exam.classId },
@@ -89,13 +99,25 @@ export const POST = handle(async (req: NextRequest) => {
     }
   }
 
+  let saved = 0;
+  let cleared = 0;
+
   await db.$transaction(async (tx) => {
     for (const entry of body.marks) {
-      const { grade, gpa } = gradeFor(entry.marks);
       const existing = await tx.result.findUnique({
         where: { studentId_examId_subjectId: { studentId: entry.studentId, examId: body.examId, subjectId: body.subjectId } },
         select: { id: true },
       });
+
+      if (entry.marks === null) {
+        if (existing) {
+          await tx.result.delete({ where: { id: existing.id } });
+          cleared += 1;
+        }
+        continue;
+      }
+
+      const { grade, gpa } = gradeFor(entry.marks);
       if (existing) {
         await tx.result.update({
           where: { id: existing.id },
@@ -113,8 +135,9 @@ export const POST = handle(async (req: NextRequest) => {
           },
         });
       }
+      saved += 1;
     }
   });
 
-  return NextResponse.json({ saved: body.marks.length });
+  return NextResponse.json({ saved, cleared });
 });

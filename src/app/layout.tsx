@@ -20,7 +20,7 @@ export const metadata: Metadata = {
     "EduSphere SMS: a modern school management system for admins, teachers, students and parents — attendance, exams, fees, timetable and more.",
   keywords: ["school management", "EduSphere", "attendance", "exams", "fees", "timetable"],
   icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+    icon: "/logo.svg",
   },
 };
 

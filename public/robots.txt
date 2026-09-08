@@ -1,14 +1,4 @@
-User-agent: Googlebot
-Allow: /
-
-User-agent: Bingbot
-Allow: /
-
-User-agent: Twitterbot
-Allow: /
-
-User-agent: facebookexternalhit
-Allow: /
-
+# EduSphere is a private school portal. Nothing here is intended for public
+# indexing — student records, fees and results sit behind the login.
 User-agent: *
-Allow: /
+Disallow: /

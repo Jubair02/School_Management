@@ -19,6 +19,7 @@ import {
   LayoutDashboard,
   LogOut,
   Megaphone,
+  KeyRound,
   Menu,
   Moon,
   PenLine,
@@ -32,7 +33,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import { useAppStore } from "@/store/app-store";
+import { useAppStore, viewFromLocation, viewToHash } from "@/store/app-store";
 import type { NavItem, Role } from "@/lib/types";
 import { adminNav } from "@/components/nav/nav-admin";
 import { teacherNav } from "@/components/nav/nav-teacher";
@@ -42,7 +43,7 @@ import { adminViews } from "@/components/admin";
 import { teacherViews } from "@/components/teacher";
 import { studentViews } from "@/components/student";
 import { parentViews } from "@/components/parent";
-import { ComingSoon } from "@/components/shared";
+import { ChangePasswordDialog, ComingSoon, ViewErrorBoundary } from "@/components/shared";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -184,6 +185,7 @@ export function AppShell() {
   const activeView = useAppStore((s) => s.activeView);
   const setActiveView = useAppStore((s) => s.setActiveView);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
 
   const role: Role = user?.role ?? "STUDENT";
   const items = NAVS[role];
@@ -191,14 +193,41 @@ export function AppShell() {
 
   const current = items.find((item) => item.key === activeView) ?? items[0];
 
-  // Keep the active view valid for the current role (also sets the default)
+  // Keep the active view valid for the current role (also sets the default).
+  // A hash naming another role's view falls back to that role's first item.
   useEffect(() => {
     if (!items.some((item) => item.key === activeView)) {
       setActiveView(items[0].key);
     }
   }, [activeView, items, setActiveView]);
 
+  // Mirror the active view into the URL so refresh and deep links work.
+  // `replace` avoids stacking a history entry for the initial normalisation.
+  useEffect(() => {
+    if (!activeView) return;
+    const target = `#${viewToHash(activeView)}`;
+    if (window.location.hash !== target) {
+      window.history.replaceState(null, "", target);
+    }
+  }, [activeView]);
+
+  // Browser Back/Forward moves between views instead of leaving the app.
+  useEffect(() => {
+    const onPopState = () => {
+      const fromUrl = viewFromLocation();
+      if (fromUrl && items.some((item) => item.key === fromUrl)) {
+        setActiveView(fromUrl);
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [items, setActiveView]);
+
   function selectView(key: string) {
+    // pushState so each navigation is a Back-able step.
+    if (typeof window !== "undefined") {
+      window.history.pushState(null, "", `#${viewToHash(key)}`);
+    }
     setActiveView(key);
     setMobileOpen(false);
   }
@@ -272,6 +301,11 @@ export function AppShell() {
                 <p className="truncate text-xs font-normal text-muted-foreground">{user?.email}</p>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => setPasswordOpen(true)}>
+                <KeyRound className="size-4" aria-hidden />
+                Change password
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => void handleLogout()} className="text-destructive focus:text-destructive">
                 <LogOut className="size-4" aria-hidden />
                 Sign out
@@ -287,7 +321,10 @@ export function AppShell() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
           >
-            {ActiveView ? <ActiveView /> : <ComingSoonView title={current.label} />}
+            {/* Keyed on the nav key so switching views clears a previous crash. */}
+            <ViewErrorBoundary key={current.key} title={current.label}>
+              {ActiveView ? <ActiveView /> : <ComingSoonView title={current.label} />}
+            </ViewErrorBoundary>
           </motion.div>
         </main>
 
@@ -295,6 +332,8 @@ export function AppShell() {
           © EduSphere SMS — Admin · Teacher · Student · Parent portal
         </footer>
       </div>
+
+      <ChangePasswordDialog open={passwordOpen} onOpenChange={setPasswordOpen} />
 
       {/* ── Mobile sidebar (Sheet) ──────────────────────── */}
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>

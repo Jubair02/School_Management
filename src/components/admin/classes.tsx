@@ -138,6 +138,8 @@ function ManageClassDialog({
   const queryClient = useQueryClient();
   const [sectionName, setSectionName] = useState("");
   const [teacherId, setTeacherId] = useState("");
+  /** Section being renamed inline: {id, name} while editing, null otherwise. */
+  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
 
   const { data: teachersData } = useQuery({
     queryKey: ["admin", "teachers", "options"],
@@ -154,6 +156,17 @@ function ManageClassDialog({
     onSuccess: () => {
       toast.success("Section added");
       setSectionName("");
+      invalidate();
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const renameSection = useMutation({
+    mutationFn: (payload: { id: string; name: string }) =>
+      api.put(`/api/sections/${payload.id}`, { name: payload.name.trim() }),
+    onSuccess: () => {
+      toast.success("Section renamed");
+      setRenaming(null);
       invalidate();
     },
     onError: (err: Error) => toast.error(err.message),
@@ -213,6 +226,17 @@ function ManageClassDialog({
                       className="inline-flex items-center gap-1 rounded-full border bg-muted/50 py-1 pl-3 pr-1.5 text-xs font-medium"
                     >
                       Section {s.name}
+                      {/* Rename in place — deleting a section to fix a typo
+                          would unlink every student assigned to it. */}
+                      <button
+                        type="button"
+                        aria-label={`Rename section ${s.name}`}
+                        className="rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-emerald-100 hover:text-emerald-700 dark:hover:bg-emerald-500/20 dark:hover:text-emerald-400"
+                        onClick={() => setRenaming({ id: s.id, name: s.name })}
+                        disabled={renameSection.isPending}
+                      >
+                        <Pencil className="size-3" aria-hidden />
+                      </button>
                       <button
                         type="button"
                         aria-label={`Remove section ${s.name}`}
@@ -226,6 +250,32 @@ function ManageClassDialog({
                   ))
                 )}
               </div>
+
+              {renaming ? (
+                <div className="mt-3 flex gap-2">
+                  <Input
+                    value={renaming.name}
+                    autoFocus
+                    aria-label="New section name"
+                    onChange={(e) => setRenaming({ ...renaming, name: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && renaming.name.trim()) renameSection.mutate(renaming);
+                      if (e.key === "Escape") setRenaming(null);
+                    }}
+                  />
+                  <Button
+                    size="sm"
+                    onClick={() => renameSection.mutate(renaming)}
+                    disabled={!renaming.name.trim() || renameSection.isPending}
+                  >
+                    Save
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setRenaming(null)}>
+                    Cancel
+                  </Button>
+                </div>
+              ) : null}
+
               <div className="mt-3 flex gap-2">
                 <Input
                   value={sectionName}

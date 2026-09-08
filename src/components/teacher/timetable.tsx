@@ -6,8 +6,7 @@ import { CalendarDays, Users } from "lucide-react";
 import { api } from "@/lib/client-api";
 import type { TimetableEntryDTO, WeekDay } from "@/lib/types";
 import { EmptyState, LoadingState, LoadError, PageHeader } from "@/components/shared";
-import { useAuth } from "@/hooks/use-auth";
-import { formatTime, type MyClass } from "./common";
+import { formatTime, isMine, type MyClassesResponse } from "./common";
 import { Badge } from "@/components/ui/badge";
 import {
   Select,
@@ -27,13 +26,13 @@ const DAYS: { value: WeekDay; label: string }[] = [
 ];
 
 export function TeacherTimetableView() {
-  const { user } = useAuth();
   const [classId, setClassId] = useState("");
 
   const { data: classesData, isLoading: classesLoading } = useQuery({
     queryKey: ["teacher", "my-classes"],
-    queryFn: () => api.get<{ classes: MyClass[] }>("/api/teachers/me/classes"),
+    queryFn: () => api.get<MyClassesResponse>("/api/teachers/me/classes"),
   });
+  const myTeacherId = classesData?.teacherId;
   const classes = classesData?.classes ?? [];
   const effectiveClassId = classes.some((c) => c.id === classId) ? classId : (classes[0]?.id ?? "");
 
@@ -65,7 +64,7 @@ export function TeacherTimetableView() {
     return map;
   }, [entries]);
 
-  const myPeriodCount = entries.filter((e) => e.teacher?.id === user?.id).length;
+  const myPeriodCount = entries.filter((e) => isMine(e.teacher?.id, myTeacherId)).length;
 
   return (
     <div className="space-y-4">
@@ -145,7 +144,7 @@ export function TeacherTimetableView() {
                       </td>
                       {DAYS.map((d) => {
                         const entry = cellMap.get(`${d.value}-${p}`);
-                        const mine = entry?.teacher?.id === user?.id;
+                        const mine = isMine(entry?.teacher?.id, myTeacherId);
                         return (
                           <td key={d.value} className="px-2 py-2 align-top">
                             {entry ? (

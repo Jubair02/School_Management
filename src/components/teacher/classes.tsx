@@ -14,9 +14,8 @@ import {
   StatusBadge,
 } from "@/components/shared";
 import { Badge } from "@/components/ui/badge";
-import { useAuth } from "@/hooks/use-auth";
 import { useAppStore } from "@/store/app-store";
-import type { MyClass } from "./common";
+import { isMine, type MyClassesResponse } from "./common";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -30,17 +29,17 @@ import {
 import { cn } from "@/lib/utils";
 
 export function TeacherClassesView() {
-  const { user } = useAuth();
   const setActiveView = useAppStore((s) => s.setActiveView);
   // Preselected by the dashboard "Details" quick action; otherwise starts empty
   // and falls back to the first class.
-  const [selectedId, setSelectedId] = useState(() => useAppStore.getState().classesPreselect ?? "");
+  const [selectedId, setSelectedId] = useState(() => useAppStore.getState().takePreselect("classesPreselect") ?? "");
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["teacher", "my-classes"],
-    queryFn: () => api.get<{ classes: MyClass[] }>("/api/teachers/me/classes"),
+    queryFn: () => api.get<MyClassesResponse>("/api/teachers/me/classes"),
   });
 
+  const myTeacherId = data?.teacherId;
   const classes = data?.classes ?? [];
   const effectiveId = classes.some((c) => c.id === selectedId) ? selectedId : (classes[0]?.id ?? "");
   const selected = classes.find((c) => c.id === effectiveId);
@@ -233,7 +232,7 @@ export function TeacherClassesView() {
                   ) : (
                     <ul className="max-h-[420px] space-y-2 overflow-y-auto scrollbar-thin">
                       {subjects.map((s) => {
-                        const mine = s.teacher?.id === user?.id;
+                        const mine = isMine(s.teacher?.id, myTeacherId);
                         return (
                           <li
                             key={s.id}

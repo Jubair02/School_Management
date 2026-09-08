@@ -8,6 +8,26 @@ export interface MyClass {
   subjectCount: number;
 }
 
+/** Shape of GET /api/teachers/me/classes. */
+export interface MyClassesResponse {
+  /**
+   * The signed-in teacher's Teacher record id. Subject/timetable DTOs identify
+   * their teacher by this id, not by the User id on `useAuth().user` — the two
+   * are different values, so comparing against the User id never matches.
+   */
+  teacherId: string;
+  classes: MyClass[];
+}
+
+/**
+ * True when `teacherId` is the signed-in teacher. Guards the undefined case:
+ * an unassigned subject has `teacher === null`, so a bare `===` against an
+ * undefined id would mark every unassigned row as "mine".
+ */
+export function isMine(teacherId: string | undefined, myTeacherId: string | undefined): boolean {
+  return Boolean(myTeacherId) && teacherId === myTeacherId;
+}
+
 /** "09:40" → "9:40 AM" (falls back to the raw value). */
 export function formatTime(t: string): string {
   const [hStr, m] = t.split(":");

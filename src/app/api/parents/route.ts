@@ -14,8 +14,8 @@ export const GET = handle(async (req: NextRequest) => {
   const where: Prisma.ParentWhereInput = query
     ? {
         OR: [
-          { user: { name: { contains: query } } },
-          { user: { email: { contains: query } } },
+          { user: { name: { contains: query, mode: "insensitive" } } },
+          { user: { email: { contains: query, mode: "insensitive" } } },
         ],
       }
     : {};

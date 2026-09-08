@@ -16,31 +16,11 @@ export class ApiError extends Error {
 
 export const UNAUTHORIZED_EVENT = "edusphere:unauthorized";
 
-/* ── Bearer-token session store ─────────────────────────────────────────
- * Cookies can be blocked when the app runs inside a cross-site iframe
- * (e.g. preview panels) or in incognito. The login response therefore also
- * carries the JWT, which we persist here and send via `Authorization` on
- * every request. Access is guarded — some browsers throw on storage access
- * in third-party frames, in which case we silently fall back to cookies.
+/* ── Session handling ───────────────────────────────────────────────────
+ * The session lives exclusively in the httpOnly `sms_token` cookie, which the
+ * browser attaches automatically. Nothing here reads or stores the JWT: script
+ * cannot touch an httpOnly cookie, so an XSS bug cannot exfiltrate a session.
  * ───────────────────────────────────────────────────────────────────────*/
-const TOKEN_KEY = "edusphere.auth-token";
-
-export function getStoredToken(): string | null {
-  try {
-    return window.localStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
-  }
-}
-
-export function setStoredToken(token: string | null): void {
-  try {
-    if (token) window.localStorage.setItem(TOKEN_KEY, token);
-    else window.localStorage.removeItem(TOKEN_KEY);
-  } catch {
-    // storage unavailable (third-party frame restrictions) — cookie-only mode
-  }
-}
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 
@@ -60,10 +40,6 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   if (opts.body !== undefined) {
     init.headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(opts.body);
-  }
-  const token = getStoredToken();
-  if (token) {
-    init.headers["Authorization"] = `Bearer ${token}`;
   }
 
   let res: Response;
@@ -90,7 +66,6 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
     }
 
     if (res.status === 401 && typeof window !== "undefined") {
-      setStoredToken(null); // drop any stale/invalid token
       window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
     }
 

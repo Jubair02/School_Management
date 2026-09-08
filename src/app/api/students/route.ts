@@ -3,7 +3,7 @@ import { z } from "zod";
 import bcrypt from "bcryptjs";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireAuth } from "@/lib/api-auth";
+import { requireAuth, teacherClassIdsFor } from "@/lib/api-auth";
 import {
   ApiError,
   GENDERS,
@@ -20,7 +20,7 @@ import {
 
 // GET /api/students?query&classId&sectionId&status&page&pageSize — ADMIN, TEACHER
 export const GET = handle(async (req: NextRequest) => {
-  await requireAuth(req, ["ADMIN", "TEACHER"]);
+  const auth = await requireAuth(req, ["ADMIN", "TEACHER"]);
 
   const { page, pageSize, skip, take } = pagination(req);
   const query = q(req, "query");
@@ -28,16 +28,29 @@ export const GET = handle(async (req: NextRequest) => {
   const sectionId = q(req, "sectionId");
   const status = q(req, "status");
 
+  // A teacher sees only students in classes they teach. An explicit classId is
+  // checked against that set; without one the whole result is narrowed to it,
+  // so an unfiltered list can never expose the rest of the school.
+  let classScope: Prisma.StudentWhereInput = classId ? { classId } : {};
+  if (auth.role === "TEACHER") {
+    const allowed = await teacherClassIdsFor(auth.id);
+    if (classId) {
+      if (!allowed.includes(classId)) throw new ApiError(403, "You do not teach this class.");
+    } else {
+      classScope = { classId: { in: allowed } };
+    }
+  }
+
   const where: Prisma.StudentWhereInput = {
-    ...(classId ? { classId } : {}),
+    ...classScope,
     ...(sectionId ? { sectionId } : {}),
     ...(status ? { status } : {}),
     ...(query
       ? {
           OR: [
-            { user: { name: { contains: query } } },
-            { user: { email: { contains: query } } },
-            { studentId: { contains: query } },
+            { user: { name: { contains: query, mode: "insensitive" } } },
+            { user: { email: { contains: query, mode: "insensitive" } } },
+            { studentId: { contains: query, mode: "insensitive" } },
           ],
         }
       : {}),

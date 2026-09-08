@@ -3,6 +3,7 @@ import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
 import { ApiError, handle, parseBody } from "@/lib/api-utils";
+import { HOUR_MS, enforceRateLimit } from "@/lib/rate-limit";
 
 const schema = z.object({
   token: z.string().min(1, "Reset token is required"),
@@ -11,6 +12,10 @@ const schema = z.object({
 
 export const POST = handle(async (req: NextRequest) => {
   const { token, password } = await parseBody(req, schema);
+
+  // Tokens are random UUIDs, so guessing is already impractical — this caps the
+  // attempt rate anyway and keeps the endpoint from being a free write path.
+  enforceRateLimit(req, [{ scope: "reset-ip", limit: 20, windowMs: HOUR_MS }]);
 
   const record = await db.passwordReset.findUnique({ where: { token } });
   if (!record) throw new ApiError(400, "Invalid reset token");
