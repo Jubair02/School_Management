@@ -1,13 +1,14 @@
-// School Management System — Prisma Schema (SQLite)
-// NOTE: SQLite does not support Prisma enums or scalar lists,
-// so role/status/type fields are String with documented allowed values.
+// School Management System — Prisma Schema (PostgreSQL)
+// NOTE: role/status/type fields are String with documented allowed values
+// (carried over from the original SQLite schema, which supported neither
+// Prisma enums nor scalar lists).
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
