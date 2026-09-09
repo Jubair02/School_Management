@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/api-auth";
+import { actorOf, diff, recordAudit, safePayload } from "@/lib/audit";
 import {
   USER_STATUSES,
   handle,
@@ -55,7 +56,7 @@ const createSchema = z.object({
 
 // POST /api/teachers — ADMIN — creates User (role TEACHER) + Teacher
 export const POST = handle(async (req: NextRequest) => {
-  await requireAuth(req, ["ADMIN"]);
+  const actor = await requireAuth(req, ["ADMIN"]);
   const body = await parseBody(req, createSchema);
 
   const teacherCode = await nextTeacherCode();
@@ -86,5 +87,11 @@ export const POST = handle(async (req: NextRequest) => {
   });
 
   const teacher = await db.teacher.findUnique({ where: { id: created.id }, include: teacherInclude });
+  await recordAudit(req, actorOf(actor), {
+    action: "CREATE", entity: "Teacher", entityId: created.id,
+    summary: `Added teacher ${body.name} (${teacherCode})`,
+    after: safePayload({ ...body, teacherId: teacherCode }),
+  });
+
   return NextResponse.json({ teacher: teacher ? toTeacherDTO(teacher) : null }, { status: 201 });
 });

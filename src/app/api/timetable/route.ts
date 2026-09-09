@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/api-auth";
+import { actorOf, recordAudit } from "@/lib/audit";
 import {
   ApiError,
   WEEK_DAYS,
@@ -44,7 +45,7 @@ const createSchema = z.object({
 
 // POST /api/timetable — ADMIN
 export const POST = handle(async (req: NextRequest) => {
-  await requireAuth(req, ["ADMIN"]);
+  const actor = await requireAuth(req, ["ADMIN"]);
   const body = await parseBody(req, createSchema);
 
   const cls = await db.class.findUnique({ where: { id: body.classId } });
@@ -89,5 +90,11 @@ export const POST = handle(async (req: NextRequest) => {
     where: { id: created.id },
     include: timetableInclude,
   });
+  await recordAudit(req, actorOf(actor), {
+    action: "CREATE", entity: "Timetable", entityId: created.id,
+    summary: `Added ${subject.name} to ${cls.name} on ${body.day} period ${body.period}`,
+    after: { class: cls.name, day: body.day, period: body.period, subject: subject.name },
+  });
+
   return NextResponse.json({ entry: toTimetableDTO(entry) }, { status: 201 });
 });

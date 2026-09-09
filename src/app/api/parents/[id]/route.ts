@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/api-auth";
+import { actorOf, diff, recordAudit } from "@/lib/audit";
 import { ApiError, handle, parentInclude, parseBody, toParentDTO } from "@/lib/api-utils";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -33,7 +34,7 @@ const updateSchema = z.object({
 // PUT /api/parents/[id] — ADMIN
 export const PUT = handle(async (req: NextRequest, ctx: Ctx) => {
   const { id } = await ctx.params;
-  await requireAuth(req, ["ADMIN"]);
+  const actor = await requireAuth(req, ["ADMIN"]);
   const body = await parseBody(req, updateSchema);
 
   const parent = await loadParent(id);
@@ -58,16 +59,35 @@ export const PUT = handle(async (req: NextRequest, ctx: Ctx) => {
   });
 
   const updated = await db.parent.findUnique({ where: { id: parent.id }, include: parentInclude });
+
+  const delta = diff(
+    { name: parent.user.name, email: parent.user.email, phone: parent.phone, address: parent.address },
+    body as Record<string, unknown>
+  );
+  if (delta.changed.length > 0) {
+    await recordAudit(req, actorOf(actor), {
+      action: "UPDATE", entity: "Parent", entityId: parent.id,
+      summary: `Edited parent ${parent.user.name} — ${delta.changed.join(", ")}`,
+      before: delta.before, after: delta.after,
+    });
+  }
+
   return NextResponse.json({ parent: updated ? toParentDTO(updated) : null });
 });
 
 // DELETE /api/parents/[id] — ADMIN — soft delete (user.status = INACTIVE)
 export const DELETE = handle(async (req: NextRequest, ctx: Ctx) => {
   const { id } = await ctx.params;
-  await requireAuth(req, ["ADMIN"]);
+  const actor = await requireAuth(req, ["ADMIN"]);
 
   const parent = await loadParent(id);
   await db.user.update({ where: { id: parent.userId }, data: { status: "INACTIVE" } });
+
+  await recordAudit(req, actorOf(actor), {
+    action: "DELETE", entity: "Parent", entityId: parent.id,
+    summary: `Deactivated parent ${parent.user.name}`,
+    before: { status: "ACTIVE" }, after: { status: "INACTIVE" },
+  });
 
   return NextResponse.json({ success: true });
 });

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/api-auth";
+import { actorOf, recordAudit } from "@/lib/audit";
 import {
   ApiError,
   feeInclude,
@@ -68,5 +69,17 @@ export const POST = handle(async (req: NextRequest, ctx: Ctx) => {
   });
 
   const updated = await db.fee.findUniqueOrThrow({ where: { id: fee.id }, include: feeInclude });
+
+  await recordAudit(req, actorOf(auth), {
+    action: "PAYMENT",
+    entity: "Payment",
+    entityId: fee.id,
+    summary:
+      `Recorded ${body.method ?? "CASH"} payment of ${body.amount} against "${updated.title}"` +
+      ` for ${updated.student.user.name} — now ${newStatus}`,
+    before: { paidAmount: alreadyPaid, status: fee.status },
+    after: { paidAmount: newPaid, status: newStatus, method: body.method ?? "CASH", note: body.note ?? null },
+  });
+
   return NextResponse.json({ fee: toFeeDTO(updated) }, { status: 201 });
 });

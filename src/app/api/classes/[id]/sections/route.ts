@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/api-auth";
+import { actorOf, diff, recordAudit } from "@/lib/audit";
 import { ApiError, handle, parseBody } from "@/lib/api-utils";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -13,7 +14,7 @@ const createSchema = z.object({
 // POST /api/classes/[id]/sections — ADMIN
 export const POST = handle(async (req: NextRequest, ctx: Ctx) => {
   const { id } = await ctx.params;
-  await requireAuth(req, ["ADMIN"]);
+  const actor = await requireAuth(req, ["ADMIN"]);
   const body = await parseBody(req, createSchema);
 
   const cls = await db.class.findUnique({ where: { id } });
@@ -23,5 +24,11 @@ export const POST = handle(async (req: NextRequest, ctx: Ctx) => {
   if (duplicate) throw new ApiError(400, "A section with this name already exists in this class");
 
   const section = await db.section.create({ data: { name: body.name, classId: id } });
+  await recordAudit(req, actorOf(actor), {
+    action: "CREATE", entity: "Section", entityId: section.id,
+    summary: `Added section ${section.name} to ${cls.name}`,
+    after: { name: section.name, class: cls.name },
+  });
+
   return NextResponse.json({ section }, { status: 201 });
 });

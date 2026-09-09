@@ -21,6 +21,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
+import { LogoMark } from "@/components/shared/logo-mark";
 import { api, ApiError } from "@/lib/client-api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -74,7 +75,7 @@ function BrandMark({ size = "md" }: { size?: "md" | "lg" }) {
           (size === "lg" ? "size-11" : "size-9")
         }
       >
-        <GraduationCap className={size === "lg" ? "size-6" : "size-5"} aria-hidden />
+        <LogoMark className={size === "lg" ? "size-6" : "size-5"} />
       </div>
       <div className="leading-tight">
         <p className="text-base font-bold tracking-tight">EduSphere</p>
@@ -196,7 +197,7 @@ export function LoginScreen() {
 
         <div className="relative flex items-center gap-3">
           <div className="flex size-11 items-center justify-center rounded-xl bg-white/15 backdrop-blur">
-            <GraduationCap className="size-6" aria-hidden />
+            <LogoMark className="size-6" />
           </div>
           <div>
             <p className="text-lg font-bold tracking-tight">EduSphere</p>

@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/api-auth";
+import { actorOf, recordAudit } from "@/lib/audit";
 import {
   ApiError,
   AUDIENCES,
@@ -82,5 +83,11 @@ export const POST = handle(async (req: NextRequest) => {
     where: { id: created.id },
     include: announcementInclude,
   });
+  await recordAudit(req, actorOf(auth), {
+    action: "CREATE", entity: "Announcement", entityId: created.id,
+    summary: `Published "${body.title}" to ${body.targetAudience}`,
+    after: { title: body.title, targetAudience: body.targetAudience, classId: body.classId ?? null },
+  });
+
   return NextResponse.json({ announcement: toAnnouncementDTO(announcement) }, { status: 201 });
 });

@@ -11,6 +11,7 @@ import { TimetableAdminView } from "./timetable";
 import { ExamsView } from "./exams";
 import { FeesView } from "./fees";
 import { AnnouncementsView } from "./announcements";
+import { AuditLogView } from "./audit-log";
 
 /**
  * Admin view registry — keys match src/components/nav/nav-admin.ts.
@@ -27,4 +28,5 @@ export const adminViews: Record<string, ComponentType> = {
   "admin:exams": ExamsView,
   "admin:fees": FeesView,
   "admin:announcements": AnnouncementsView,
+  "admin:audit": AuditLogView,
 };

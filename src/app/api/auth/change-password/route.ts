@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/api-auth";
 import { ApiError, handle, parseBody } from "@/lib/api-utils";
 import { MINUTE_MS, enforceRateLimit } from "@/lib/rate-limit";
+import { actorOf, recordAudit } from "@/lib/audit";
 
 const schema = z.object({
   currentPassword: z.string().min(1, "Your current password is required"),
@@ -40,6 +41,13 @@ export const POST = handle(async (req: NextRequest) => {
   await db.user.update({
     where: { id: user.id },
     data: { password: await bcrypt.hash(body.newPassword, 10) },
+  });
+
+  await recordAudit(req, actorOf(auth), {
+    action: "PASSWORD_CHANGE",
+    entity: "Auth",
+    entityId: user.id,
+    summary: `${auth.name} changed their own password`,
   });
 
   // Note: existing JWTs stay valid until they expire — they carry no password

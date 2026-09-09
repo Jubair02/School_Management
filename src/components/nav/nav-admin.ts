@@ -15,4 +15,5 @@ export const adminNav: NavItem[] = [
   { key: "admin:exams", label: "Exams", icon: "FileText" },
   { key: "admin:fees", label: "Fees", icon: "Wallet" },
   { key: "admin:announcements", label: "Announcements", icon: "Megaphone" },
+  { key: "admin:audit", label: "Audit Log", icon: "ScrollText" },
 ];

@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/api-auth";
+import { actorOf, diff, recordAudit, safePayload } from "@/lib/audit";
 import {
   ApiError,
   USER_STATUSES,
@@ -42,7 +43,7 @@ const updateSchema = z.object({
 // PUT /api/teachers/[id] — ADMIN
 export const PUT = handle(async (req: NextRequest, ctx: Ctx) => {
   const { id } = await ctx.params;
-  await requireAuth(req, ["ADMIN"]);
+  const actor = await requireAuth(req, ["ADMIN"]);
   const body = await parseBody(req, updateSchema);
 
   const teacher = await loadTeacher(id);
@@ -70,19 +71,40 @@ export const PUT = handle(async (req: NextRequest, ctx: Ctx) => {
   });
 
   const updated = await db.teacher.findUnique({ where: { id: teacher.id }, include: teacherInclude });
+  const delta = diff(
+    {
+      name: teacher.user.name, email: teacher.user.email, phone: teacher.user.phone,
+      department: teacher.department, status: teacher.status,
+    },
+    body as Record<string, unknown>
+  );
+  if (delta.changed.length > 0) {
+    await recordAudit(req, actorOf(actor), {
+      action: "UPDATE", entity: "Teacher", entityId: teacher.id,
+      summary: `Edited teacher ${teacher.user.name} (${teacher.teacherId}) — ${delta.changed.join(", ")}`,
+      before: delta.before, after: delta.after,
+    });
+  }
+
   return NextResponse.json({ teacher: updated ? toTeacherDTO(updated) : null });
 });
 
 // DELETE /api/teachers/[id] — ADMIN — soft delete
 export const DELETE = handle(async (req: NextRequest, ctx: Ctx) => {
   const { id } = await ctx.params;
-  await requireAuth(req, ["ADMIN"]);
+  const actor = await requireAuth(req, ["ADMIN"]);
 
   const teacher = await loadTeacher(id);
   await db.$transaction([
     db.user.update({ where: { id: teacher.userId }, data: { status: "INACTIVE" } }),
     db.teacher.update({ where: { id: teacher.id }, data: { status: "INACTIVE" } }),
   ]);
+
+  await recordAudit(req, actorOf(actor), {
+    action: "DELETE", entity: "Teacher", entityId: id,
+    summary: `Deactivated teacher ${teacher.user.name} (${teacher.teacherId})`,
+    before: { status: "ACTIVE" }, after: { status: "INACTIVE" },
+  });
 
   return NextResponse.json({ success: true });
 });

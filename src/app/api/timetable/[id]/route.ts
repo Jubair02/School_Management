@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/api-auth";
+import { actorOf, diff, recordAudit } from "@/lib/audit";
 import {
   ApiError,
   WEEK_DAYS,
@@ -27,7 +28,7 @@ const updateSchema = z.object({
 // delete-and-recreate.
 export const PUT = handle(async (req: NextRequest, ctx: Ctx) => {
   const { id } = await ctx.params;
-  await requireAuth(req, ["ADMIN"]);
+  const actor = await requireAuth(req, ["ADMIN"]);
   const body = await parseBody(req, updateSchema);
 
   const existing = await db.timetable.findUnique({ where: { id } });
@@ -80,17 +81,38 @@ export const PUT = handle(async (req: NextRequest, ctx: Ctx) => {
   });
 
   const entry = await db.timetable.findUniqueOrThrow({ where: { id }, include: timetableInclude });
+  const delta = diff(
+    {
+      day: existing.day, period: existing.period, startTime: existing.startTime,
+      endTime: existing.endTime, subjectId: existing.subjectId, teacherId: existing.teacherId,
+    },
+    { day, period, startTime, endTime, subjectId: body.subjectId, teacherId: body.teacherId }
+  );
+  if (delta.changed.length > 0) {
+    await recordAudit(req, actorOf(actor), {
+      action: "UPDATE", entity: "Timetable", entityId: id,
+      summary: `Edited timetable slot ${day} period ${period} — ${delta.changed.join(", ")}`,
+      before: delta.before, after: delta.after,
+    });
+  }
+
   return NextResponse.json({ entry: toTimetableDTO(entry) });
 });
 
 // DELETE /api/timetable/[id] — ADMIN
 export const DELETE = handle(async (req: NextRequest, ctx: Ctx) => {
   const { id } = await ctx.params;
-  await requireAuth(req, ["ADMIN"]);
+  const actor = await requireAuth(req, ["ADMIN"]);
 
   const existing = await db.timetable.findUnique({ where: { id } });
   if (!existing) throw new ApiError(404, "Timetable entry not found");
 
   await db.timetable.delete({ where: { id } });
+  await recordAudit(req, actorOf(actor), {
+    action: "DELETE", entity: "Timetable", entityId: id,
+    summary: `Removed timetable slot ${existing.day} period ${existing.period}`,
+    before: { day: existing.day, period: existing.period, classId: existing.classId },
+  });
+
   return NextResponse.json({ success: true });
 });

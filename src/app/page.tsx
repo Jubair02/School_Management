@@ -1,9 +1,9 @@
 "use client";
 
-import { GraduationCap } from "lucide-react";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { LoginScreen } from "@/components/auth/login-screen";
 import { AppShell } from "@/components/layout/app-shell";
+import { LogoMark } from "@/components/shared/logo-mark";
 
 function Splash() {
   return (
@@ -11,7 +11,7 @@ function Splash() {
       <div className="relative">
         <div className="absolute inset-0 -m-3 animate-ping rounded-2xl bg-emerald-500/20" />
         <div className="relative flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-700 text-white shadow-lg">
-          <GraduationCap className="size-9" aria-hidden />
+          <LogoMark className="size-9" />
         </div>
       </div>
       <div className="text-center">

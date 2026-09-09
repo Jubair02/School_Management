@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/api-auth";
+import { actorOf, diff, recordAudit } from "@/lib/audit";
 import { ApiError, EXAM_STATUSES, examInclude, handle, parseBody, requireDay, toExamDTO } from "@/lib/api-utils";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -16,7 +17,7 @@ const updateSchema = z.object({
 // PUT /api/exams/[id] — ADMIN
 export const PUT = handle(async (req: NextRequest, ctx: Ctx) => {
   const { id } = await ctx.params;
-  await requireAuth(req, ["ADMIN"]);
+  const actor = await requireAuth(req, ["ADMIN"]);
   const body = await parseBody(req, updateSchema);
 
   const existing = await db.exam.findUnique({ where: { id } });
@@ -45,17 +46,35 @@ export const PUT = handle(async (req: NextRequest, ctx: Ctx) => {
   }
 
   const updated = await db.exam.findUniqueOrThrow({ where: { id }, include: examInclude });
+  const delta = diff(
+    { name: existing.name, status: existing.status, startDate: existing.startDate, endDate: existing.endDate },
+    body as Record<string, unknown>
+  );
+  if (delta.changed.length > 0) {
+    await recordAudit(req, actorOf(actor), {
+      action: "UPDATE", entity: "Exam", entityId: id,
+      summary: `Edited exam ${existing.name} — ${delta.changed.join(", ")}`,
+      before: delta.before, after: delta.after,
+    });
+  }
+
   return NextResponse.json({ exam: toExamDTO(updated) });
 });
 
 // DELETE /api/exams/[id] — ADMIN (results cascade)
 export const DELETE = handle(async (req: NextRequest, ctx: Ctx) => {
   const { id } = await ctx.params;
-  await requireAuth(req, ["ADMIN"]);
+  const actor = await requireAuth(req, ["ADMIN"]);
 
   const existing = await db.exam.findUnique({ where: { id } });
   if (!existing) throw new ApiError(404, "Exam not found");
 
   await db.exam.delete({ where: { id } });
+  await recordAudit(req, actorOf(actor), {
+    action: "DELETE", entity: "Exam", entityId: id,
+    summary: `Deleted exam ${existing.name} and every result recorded against it`,
+    before: { name: existing.name, classId: existing.classId, status: existing.status },
+  });
+
   return NextResponse.json({ success: true });
 });

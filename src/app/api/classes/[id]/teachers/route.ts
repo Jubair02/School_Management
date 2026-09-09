@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/api-auth";
+import { actorOf, diff, recordAudit } from "@/lib/audit";
 import { ApiError, handle, parseBody, q } from "@/lib/api-utils";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -13,23 +14,32 @@ const assignSchema = z.object({
 // POST /api/classes/[id]/teachers — ADMIN — assign class teacher (TeacherClass)
 export const POST = handle(async (req: NextRequest, ctx: Ctx) => {
   const { id } = await ctx.params;
-  await requireAuth(req, ["ADMIN"]);
+  const actor = await requireAuth(req, ["ADMIN"]);
   const body = await parseBody(req, assignSchema);
 
   const cls = await db.class.findUnique({ where: { id } });
   if (!cls) throw new ApiError(404, "Class not found");
 
-  const teacher = await db.teacher.findUnique({ where: { id: body.teacherId } });
+  const teacher = await db.teacher.findUnique({
+    where: { id: body.teacherId },
+    include: { user: { select: { name: true } } },
+  });
   if (!teacher) throw new ApiError(404, "Teacher not found");
 
   await db.teacherClass.create({ data: { teacherId: teacher.id, classId: id } });
+  await recordAudit(req, actorOf(actor), {
+    action: "CREATE", entity: "Class", entityId: id,
+    summary: `Assigned ${teacher.user.name} as class teacher of ${cls.name}`,
+    after: { teacherId: body.teacherId, class: cls.name },
+  });
+
   return NextResponse.json({ success: true }, { status: 201 });
 });
 
 // DELETE /api/classes/[id]/teachers?teacherId= — ADMIN — remove assignment
 export const DELETE = handle(async (req: NextRequest, ctx: Ctx) => {
   const { id } = await ctx.params;
-  await requireAuth(req, ["ADMIN"]);
+  const actor = await requireAuth(req, ["ADMIN"]);
 
   const teacherId = q(req, "teacherId");
   if (!teacherId) throw new ApiError(400, "teacherId query parameter is required");
@@ -40,5 +50,11 @@ export const DELETE = handle(async (req: NextRequest, ctx: Ctx) => {
   if (!assignment) throw new ApiError(404, "This teacher is not assigned to this class");
 
   await db.teacherClass.delete({ where: { id: assignment.id } });
+  await recordAudit(req, actorOf(actor), {
+    action: "DELETE", entity: "Class", entityId: id,
+    summary: `Removed class-teacher assignment from class ${id}`,
+    before: { teacherId },
+  });
+
   return NextResponse.json({ success: true });
 });

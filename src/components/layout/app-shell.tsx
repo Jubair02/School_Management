@@ -24,6 +24,7 @@ import {
   Moon,
   PenLine,
   School,
+  ScrollText,
   Sun,
   UserCog,
   UserRound,
@@ -56,6 +57,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { LogoMark } from "@/components/shared/logo-mark";
 
 // lucide icon resolution from the string name stored in nav files
 const ICONS: Record<string, LucideIcon> = {
@@ -78,6 +80,7 @@ const ICONS: Record<string, LucideIcon> = {
   Award,
   Wallet,
   Megaphone,
+  ScrollText,
 };
 
 function iconFor(name: string): LucideIcon {
@@ -121,7 +124,7 @@ function Brand({ compact = false }: { compact?: boolean }) {
           compact ? "size-8" : "size-9"
         )}
       >
-        <GraduationCap className={compact ? "size-4.5" : "size-5"} aria-hidden />
+        <LogoMark className={compact ? "size-4.5" : "size-5"} />
       </div>
       <div className="leading-tight">
         <p className="text-sm font-bold tracking-tight">EduSphere</p>

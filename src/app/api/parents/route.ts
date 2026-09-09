@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/api-auth";
+import { actorOf, diff, recordAudit, safePayload } from "@/lib/audit";
 import { handle, parentInclude, parseBody, q, toParentDTO } from "@/lib/api-utils";
 
 // GET /api/parents?query — ADMIN
@@ -38,7 +39,7 @@ const createSchema = z.object({
 
 // POST /api/parents — ADMIN — creates User (role PARENT) + Parent
 export const POST = handle(async (req: NextRequest) => {
-  await requireAuth(req, ["ADMIN"]);
+  const actor = await requireAuth(req, ["ADMIN"]);
   const body = await parseBody(req, createSchema);
 
   const hashed = await bcrypt.hash(body.password ?? "Parent@123", 10);
@@ -59,5 +60,11 @@ export const POST = handle(async (req: NextRequest) => {
   });
 
   const parent = await db.parent.findUnique({ where: { id: created.id }, include: parentInclude });
+  await recordAudit(req, actorOf(actor), {
+    action: "CREATE", entity: "Parent", entityId: created.id,
+    summary: `Added parent ${body.name}`,
+    after: safePayload({ ...body }),
+  });
+
   return NextResponse.json({ parent: parent ? toParentDTO(parent) : null }, { status: 201 });
 });

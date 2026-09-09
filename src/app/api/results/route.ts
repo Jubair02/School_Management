@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireAuth, requireClassAccess } from "@/lib/api-auth";
+import { actorOf, recordAudit } from "@/lib/audit";
 import { ApiError, handle, parseBody } from "@/lib/api-utils";
 import { gradeFor } from "@/lib/grade";
 
@@ -138,6 +139,24 @@ export const POST = handle(async (req: NextRequest) => {
       saved += 1;
     }
   });
+
+  // Grades are the most disputed data in the system: log the roster-level change
+  // with per-student values so a later challenge can be answered precisely.
+  if (saved > 0 || cleared > 0) {
+    await recordAudit(req, actorOf(auth), {
+      action: "GRADE",
+      entity: "Result",
+      entityId: `${body.examId}:${body.subjectId}`,
+      summary:
+        `${exam.name} — ${subject.name}: ${saved} mark(s) saved` +
+        (cleared > 0 ? `, ${cleared} cleared` : ""),
+      after: {
+        exam: exam.name,
+        subject: subject.name,
+        entries: body.marks.map((m) => ({ studentId: m.studentId, marks: m.marks })),
+      },
+    });
+  }
 
   return NextResponse.json({ saved, cleared });
 });

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/api-auth";
+import { actorOf, diff, recordAudit } from "@/lib/audit";
 import { ApiError, handle, parseBody, q, subjectInclude, toSubjectDTO } from "@/lib/api-utils";
 
 // GET /api/subjects?classId — any logged-in user
@@ -27,7 +28,7 @@ const createSchema = z.object({
 
 // POST /api/subjects — ADMIN
 export const POST = handle(async (req: NextRequest) => {
-  await requireAuth(req, ["ADMIN"]);
+  const actor = await requireAuth(req, ["ADMIN"]);
   const body = await parseBody(req, createSchema);
 
   const cls = await db.class.findUnique({ where: { id: body.classId } });
@@ -51,5 +52,11 @@ export const POST = handle(async (req: NextRequest) => {
     where: { id: created.id },
     include: subjectInclude,
   });
+  await recordAudit(req, actorOf(actor), {
+    action: "CREATE", entity: "Subject", entityId: created.id,
+    summary: `Created subject ${body.name} (${body.code}) in ${cls.name}`,
+    after: { name: body.name, code: body.code, class: cls.name, teacherId: body.teacherId ?? null },
+  });
+
   return NextResponse.json({ subject: toSubjectDTO(subject) }, { status: 201 });
 });

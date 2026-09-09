@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/api-auth";
+import { actorOf, diff, recordAudit } from "@/lib/audit";
 import { ApiError, EXAM_STATUSES, examInclude, handle, parseBody, q, requireDay, toExamDTO } from "@/lib/api-utils";
 
 // GET /api/exams?classId — any logged-in user
@@ -27,7 +28,7 @@ const createSchema = z.object({
 
 // POST /api/exams — ADMIN
 export const POST = handle(async (req: NextRequest) => {
-  await requireAuth(req, ["ADMIN"]);
+  const actor = await requireAuth(req, ["ADMIN"]);
   const body = await parseBody(req, createSchema);
 
   const cls = await db.class.findUnique({ where: { id: body.classId } });
@@ -52,5 +53,11 @@ export const POST = handle(async (req: NextRequest) => {
   });
 
   const exam = await db.exam.findUniqueOrThrow({ where: { id: created.id }, include: examInclude });
+  await recordAudit(req, actorOf(actor), {
+    action: "CREATE", entity: "Exam", entityId: created.id,
+    summary: `Scheduled exam ${body.name} for ${cls.name} (${body.startDate} to ${body.endDate})`,
+    after: { name: body.name, class: cls.name, startDate: body.startDate, endDate: body.endDate },
+  });
+
   return NextResponse.json({ exam: toExamDTO(exam) }, { status: 201 });
 });

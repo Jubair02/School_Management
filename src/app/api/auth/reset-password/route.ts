@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
 import { ApiError, handle, parseBody } from "@/lib/api-utils";
 import { HOUR_MS, enforceRateLimit } from "@/lib/rate-limit";
+import { anonymousActor, recordAudit } from "@/lib/audit";
 
 const schema = z.object({
   token: z.string().min(1, "Reset token is required"),
@@ -27,6 +28,19 @@ export const POST = handle(async (req: NextRequest) => {
     db.user.update({ where: { id: record.userId }, data: { password: hashed } }),
     db.passwordReset.update({ where: { id: record.id }, data: { used: true } }),
   ]);
+
+  // The actor is whoever held the token, which is not necessarily the account
+  // owner — so the entry is attributed to the account, flagged as a reset.
+  const owner = await db.user.findUnique({
+    where: { id: record.userId },
+    select: { id: true, name: true, role: true },
+  });
+  await recordAudit(req, owner ?? anonymousActor(), {
+    action: "PASSWORD_RESET",
+    entity: "Auth",
+    entityId: record.userId,
+    summary: `Password reset via token for ${owner?.name ?? "unknown account"}`,
+  });
 
   return NextResponse.json({ success: true });
 });

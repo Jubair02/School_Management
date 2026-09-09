@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/api-auth";
+import { actorOf, recordAudit } from "@/lib/audit";
 import {
   ApiError,
   FEE_TYPES,
@@ -94,7 +95,7 @@ const createSchema = z.object({
 
 // POST /api/fees — ADMIN
 export const POST = handle(async (req: NextRequest) => {
-  await requireAuth(req, ["ADMIN"]);
+  const auth = await requireAuth(req, ["ADMIN"]);
   const body = await parseBody(req, createSchema);
 
   const student = await db.student.findUnique({ where: { id: body.studentId } });
@@ -116,5 +117,14 @@ export const POST = handle(async (req: NextRequest) => {
   });
 
   const fee = await db.fee.findUniqueOrThrow({ where: { id: created.id }, include: feeInclude });
+
+  await recordAudit(req, actorOf(auth), {
+    action: "CREATE",
+    entity: "Fee",
+    entityId: fee.id,
+    summary: `Raised ${body.type} invoice "${body.title}" of ${body.amount} for ${fee.student.user.name}`,
+    after: { title: body.title, type: body.type, amount: body.amount, dueDate: body.dueDate },
+  });
+
   return NextResponse.json({ fee: toFeeDTO(fee) }, { status: 201 });
 });

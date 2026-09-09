@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/api-auth";
+import { actorOf, diff, recordAudit } from "@/lib/audit";
 import {
   ApiError,
   FEE_TYPES,
@@ -27,7 +28,7 @@ const updateSchema = z.object({
 // deleting the invoice, which cascades away its whole payment history.
 export const PUT = handle(async (req: NextRequest, ctx: Ctx) => {
   const { id } = await ctx.params;
-  await requireAuth(req, ["ADMIN"]);
+  const auth = await requireAuth(req, ["ADMIN"]);
   const body = await parseBody(req, updateSchema);
 
   const existing = await db.fee.findUnique({ where: { id } });
@@ -60,17 +61,53 @@ export const PUT = handle(async (req: NextRequest, ctx: Ctx) => {
   });
 
   const updated = await db.fee.findUniqueOrThrow({ where: { id }, include: feeInclude });
+
+  const delta = diff(
+    { title: existing.title, type: existing.type, amount: toMoney(existing.amount), dueDate: existing.dueDate },
+    { title: body.title, type: body.type, amount: body.amount, dueDate }
+  );
+  if (delta.changed.length > 0) {
+    await recordAudit(req, actorOf(auth), {
+      action: "UPDATE",
+      entity: "Fee",
+      entityId: id,
+      summary: `Edited invoice "${updated.title}" for ${updated.student.user.name} (${delta.changed.join(", ")})`,
+      before: delta.before,
+      after: delta.after,
+    });
+  }
+
   return NextResponse.json({ fee: toFeeDTO(updated) });
 });
 
 // DELETE /api/fees/[id] — ADMIN (payments cascade)
 export const DELETE = handle(async (req: NextRequest, ctx: Ctx) => {
   const { id } = await ctx.params;
-  await requireAuth(req, ["ADMIN"]);
+  const auth = await requireAuth(req, ["ADMIN"]);
 
-  const existing = await db.fee.findUnique({ where: { id } });
+  const existing = await db.fee.findUnique({
+    where: { id },
+    include: { student: { include: { user: { select: { name: true } } } }, _count: { select: { payments: true } } },
+  });
   if (!existing) throw new ApiError(404, "Fee not found");
 
   await db.fee.delete({ where: { id } });
+
+  await recordAudit(req, actorOf(auth), {
+    action: "DELETE",
+    entity: "Fee",
+    entityId: id,
+    summary:
+      `Deleted invoice "${existing.title}" (${toMoney(existing.amount)}) for ${existing.student.user.name}` +
+      `, discarding ${existing._count.payments} payment record(s)`,
+    before: {
+      title: existing.title,
+      type: existing.type,
+      amount: toMoney(existing.amount),
+      paidAmount: toMoney(existing.paidAmount),
+      payments: existing._count.payments,
+    },
+  });
+
   return NextResponse.json({ success: true });
 });

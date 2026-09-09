@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireAuth } from "@/lib/api-auth";
+import { actorOf, diff, recordAudit } from "@/lib/audit";
 import { ApiError, classInclude, handle, naturalCompare, parseBody, toClassDTO } from "@/lib/api-utils";
 
 // GET /api/classes — any logged-in user
@@ -23,7 +24,7 @@ const createSchema = z.object({
 
 // POST /api/classes — ADMIN
 export const POST = handle(async (req: NextRequest) => {
-  await requireAuth(req, ["ADMIN"]);
+  const actor = await requireAuth(req, ["ADMIN"]);
   const body = await parseBody(req, createSchema);
 
   const duplicate = await db.class.findFirst({
@@ -35,5 +36,11 @@ export const POST = handle(async (req: NextRequest) => {
 
   const created = await db.class.create({ data: { name: body.name, academicYear: body.academicYear } });
   const full = await db.class.findUniqueOrThrow({ where: { id: created.id }, include: classInclude });
+  await recordAudit(req, actorOf(actor), {
+    action: "CREATE", entity: "Class", entityId: created.id,
+    summary: `Created class ${body.name} (${body.academicYear})`,
+    after: { name: body.name, academicYear: body.academicYear },
+  });
+
   return NextResponse.json({ class: toClassDTO(full) }, { status: 201 });
 });

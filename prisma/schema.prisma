@@ -34,6 +34,46 @@ model User {
   resetTokens   PasswordReset[]
   announcements Announcement[]  @relation("PublishedBy")
   markedAttendance Attendance[] @relation("MarkedBy")
+  auditEntries  AuditLog[]      @relation("AuditActor")
+}
+
+// ─────────────────────────── Audit ───────────────────────────
+
+/**
+ * Append-only record of who changed what. Nothing in the application updates
+ * or deletes a row here.
+ *
+ * `actorName` / `actorRole` are deliberately denormalised: the point of an
+ * audit trail is that it still reads correctly years later, after the account
+ * has been renamed, changed role, or been removed. The `actor` relation is
+ * SetNull rather than Cascade for the same reason — deleting a user must not
+ * erase the record of what they did.
+ */
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  actor     User?    @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actorName String
+  actorRole String
+  // action: CREATE | UPDATE | DELETE | LOGIN | LOGIN_FAILED | LOGOUT
+  //         PASSWORD_CHANGE | PASSWORD_RESET | PAYMENT | GRADE | ATTENDANCE
+  action    String
+  // entity: Student | Teacher | Parent | Class | Section | Subject | Exam
+  //         Result | Attendance | Fee | Payment | Announcement | Timetable | Auth
+  entity    String
+  entityId  String?
+  /** One line a human can read without decoding the payloads. */
+  summary   String
+  /** Changed fields only — `before` is null on create, `after` null on delete. */
+  before    Json?
+  after     Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([entity, entityId])
+  @@index([actorId])
+  @@index([action])
 }
 
 model PasswordReset {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireAuth, requireClassAccess } from "@/lib/api-auth";
+import { actorOf, recordAudit } from "@/lib/audit";
 import {
   ApiError,
   ATTENDANCE_STATUSES,
@@ -140,6 +141,22 @@ export const POST = handle(async (req: NextRequest) => {
       saved += 1;
     }
   });
+
+  if (saved > 0 || cleared > 0) {
+    await recordAudit(req, actorOf(auth), {
+      action: "ATTENDANCE",
+      entity: "Attendance",
+      entityId: `${body.classId}:${body.date}`,
+      summary:
+        `${cls.name} on ${body.date}: ${saved} student(s) marked` +
+        (cleared > 0 ? `, ${cleared} cleared` : ""),
+      after: {
+        class: cls.name,
+        date: body.date,
+        entries: body.records.map((r) => ({ studentId: r.studentId, status: r.status })),
+      },
+    });
+  }
 
   return NextResponse.json({ saved, cleared });
 });

@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireAuth, teacherClassIdsFor } from "@/lib/api-auth";
+import { actorOf, diff, recordAudit, safePayload } from "@/lib/audit";
 import {
   ApiError,
   GENDERS,
@@ -90,7 +91,7 @@ const updateSchema = z.object({
 // PUT /api/students/[id] — ADMIN
 export const PUT = handle(async (req: NextRequest, ctx: Ctx) => {
   const { id } = await ctx.params;
-  await requireAuth(req, ["ADMIN"]);
+  const actor = await requireAuth(req, ["ADMIN"]);
   const body = await parseBody(req, updateSchema);
 
   const student = await loadStudent(id);
@@ -135,19 +136,42 @@ export const PUT = handle(async (req: NextRequest, ctx: Ctx) => {
   });
 
   const updated = await db.student.findUnique({ where: { id: student.id }, include: studentInclude });
+  const delta = diff(
+    {
+      name: student.user.name, email: student.user.email, phone: student.user.phone,
+      rollNumber: student.rollNumber, gender: student.gender, address: student.address,
+      classId: student.classId, sectionId: student.sectionId, parentId: student.parentId,
+      status: student.status, dateOfBirth: student.dateOfBirth,
+    },
+    body as Record<string, unknown>
+  );
+  if (delta.changed.length > 0) {
+    await recordAudit(req, actorOf(actor), {
+      action: "UPDATE", entity: "Student", entityId: student.id,
+      summary: `Edited student ${student.user.name} (${student.studentId}) — ${delta.changed.join(", ")}`,
+      before: delta.before, after: delta.after,
+    });
+  }
+
   return NextResponse.json({ student: updated ? toStudentDTO(updated) : null });
 });
 
 // DELETE /api/students/[id] — ADMIN — soft delete (INACTIVE on User + Student)
 export const DELETE = handle(async (req: NextRequest, ctx: Ctx) => {
   const { id } = await ctx.params;
-  await requireAuth(req, ["ADMIN"]);
+  const actor = await requireAuth(req, ["ADMIN"]);
 
   const student = await loadStudent(id);
   await db.$transaction([
     db.user.update({ where: { id: student.userId }, data: { status: "INACTIVE" } }),
     db.student.update({ where: { id: student.id }, data: { status: "INACTIVE" } }),
   ]);
+
+  await recordAudit(req, actorOf(actor), {
+    action: "DELETE", entity: "Student", entityId: student.id,
+    summary: `Deactivated student ${student.user.name} (${student.studentId})`,
+    before: { status: "ACTIVE" }, after: { status: "INACTIVE" },
+  });
 
   return NextResponse.json({ success: true });
 });

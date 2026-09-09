@@ -353,6 +353,33 @@ export interface ParentDashboard {
   announcements: AnnouncementDTO[];
 }
 
+// ── Audit trail ────────────────────────────────────────────
+
+export interface AuditLogDTO {
+  id: string;
+  actorId: string | null;
+  actorName: string;
+  actorRole: string;
+  action: string;
+  entity: string;
+  entityId: string | null;
+  summary: string;
+  /** Changed fields only. Null on create (before) and delete (after). */
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  ip: string | null;
+  createdAt: string;
+}
+
+export interface AuditListResponse {
+  entries: AuditLogDTO[];
+  total: number;
+  page: number;
+  pageSize: number;
+  /** Distinct values present in the data, for populating filter dropdowns. */
+  facets: { actions: string[]; entities: string[] };
+}
+
 // ── Navigation (frontend) ──────────────────────────────────
 
 export interface NavItem {
